@@ -32,10 +32,5 @@
   },
   "retriever": {
     "top_k": 20
-  },
-  "text_splitter": {
-    "split_by": "word",
-    "chunk_size": 350,
-    "chunk_overlap": 100
   }
 }

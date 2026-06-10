@@ -16,9 +16,20 @@ from api.azureai_client import AzureAIClient
 from api.dashscope_client import DashscopeClient
 from adalflow import GoogleGenAIClient, OllamaClient
 
-# Get API keys from environment variables
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-LITELLM_API_KEY = os.environ.get('LITELLM_API_KEY')
+# --- Plan-defined LLM env vars (OpenAI-compatible direct path) ---
+# Set LLM_BASE_URL + LLM_API_KEY + LLM_MODEL to use any OpenAI-compatible provider
+# (DeepSeek, Qwen, SiliconFlow, vLLM, etc.) without a LiteLLM proxy.
+LLM_BASE_URL = os.environ.get('LLM_BASE_URL')
+LLM_API_KEY = os.environ.get('LLM_API_KEY')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'deepseek-chat')
+
+# --- Plan-defined Embedding env vars (OpenAI-compatible direct path) ---
+EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL')
+EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY')
+
+# --- Legacy provider API keys ---
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY') or LLM_API_KEY
+LITELLM_API_KEY = os.environ.get('LITELLM_API_KEY') or LLM_API_KEY
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
@@ -151,6 +162,25 @@ def load_generator_config():
             else:
                 logger.warning(f"Unknown provider or client class: {provider_id}")
 
+    # Inject "direct" provider when LLM_BASE_URL is set (plan-defined path)
+    if LLM_BASE_URL and LLM_API_KEY:
+        if "providers" not in generator_config:
+            generator_config["providers"] = {}
+        generator_config["providers"]["direct"] = {
+            "client_class": "OpenAIClient",
+            "model_client": OpenAIClient,
+            "default_model": LLM_MODEL,
+            "models": {LLM_MODEL: {}},
+            "initialize_kwargs": {
+                "base_url": LLM_BASE_URL,
+                "api_key": LLM_API_KEY,
+            },
+        }
+        # Make "direct" the default when explicitly configured
+        if "default_provider" not in generator_config or generator_config.get("default_provider") == "google":
+            generator_config["default_provider"] = "direct"
+        logger.info(f"LLM direct provider configured: base_url={LLM_BASE_URL}, model={LLM_MODEL}")
+
     return generator_config
 
 # Load embedder configuration
@@ -164,6 +194,22 @@ def load_embedder_config():
             if class_name in CLIENT_CLASSES:
                 embedder_config[key]["model_client"] = CLIENT_CLASSES[class_name]
 
+    # Inject direct embedder config when EMBEDDING_BASE_URL is set
+    if EMBEDDING_BASE_URL:
+        embedder_model = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-m3")
+        embedder_api_key = EMBEDDING_API_KEY or LLM_API_KEY
+        embedder_config["embedder_direct"] = {
+            "model_client": OpenAIClient,
+            "client_class": "OpenAIClient",
+            "initialize_kwargs": {
+                "base_url": EMBEDDING_BASE_URL,
+                "api_key": embedder_api_key,
+            },
+            "model_kwargs": {"model": embedder_model},
+            "batch_size": int(os.environ.get("EMBEDDING_BATCH_SIZE", "500")),
+        }
+        logger.info(f"Embedding direct config: base_url={EMBEDDING_BASE_URL}, model={embedder_model}")
+
     return embedder_config
 
 def get_embedder_config():
@@ -174,6 +220,9 @@ def get_embedder_config():
         dict: The embedder configuration with model_client resolved
     """
     embedder_type = EMBEDDER_TYPE
+    # Direct OpenAI-compatible path (plan-defined: EMBEDDING_BASE_URL)
+    if EMBEDDING_BASE_URL and 'embedder_direct' in configs:
+        return configs["embedder_direct"]
     if embedder_type == 'bedrock' and 'embedder_bedrock' in configs:
         return configs.get("embedder_bedrock", {})
     elif embedder_type == 'google' and 'embedder_google' in configs:
@@ -347,7 +396,7 @@ if generator_config:
 
 # Update embedder configuration
 if embedder_config:
-    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock", "retriever", "text_splitter"]:
+    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock", "retriever"]:
         if key in embedder_config:
             configs[key] = embedder_config[key]
 

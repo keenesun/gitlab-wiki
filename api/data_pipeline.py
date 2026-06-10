@@ -1,21 +1,23 @@
-import adalflow as adal
-from adalflow.core.types import Document, List
-from adalflow.components.data_process import TextSplitter, ToEmbeddings
 import os
+import pickle
 import subprocess
 import json
 import tiktoken
 import logging
 import base64
 import glob
-from adalflow.utils import get_adalflow_default_root_path
-from adalflow.core.db import LocalDB
-from api.config import configs, DEFAULT_EXCLUDED_DIRS, DEFAULT_EXCLUDED_FILES
-from api.ollama_patch import OllamaDocumentProcessor
+from typing import List
 from urllib.parse import urlparse, urlunparse, quote
 import requests
 from requests.exceptions import RequestException
 
+from api.types import Document, deepwiki_root_path
+from api.config import configs, DEFAULT_EXCLUDED_DIRS, DEFAULT_EXCLUDED_FILES
+from api.ollama_patch import OllamaDocumentProcessor
+from api.chunker import CHUNKER_VERSION, chunk_documents, enrich_transformed_documents
+from api.db.chroma_store import ChromaStore, repo_hash
+from api.db.meta_store import MetaStore, SCHEMA_VERSION
+from api.incremental import sync_index_state
 from api.tools.embedder import get_embedder
 
 # Configure logging
@@ -23,6 +25,28 @@ logger = logging.getLogger(__name__)
 
 # Maximum token limit for OpenAI embedding models
 MAX_EMBEDDING_TOKENS = 8192
+
+
+def _repo_id(repo_url_or_path: str) -> str:
+    return f"repo_{repo_hash(repo_url_or_path.strip())}"
+
+
+def _embedding_fingerprint(embedder_type: str = None) -> dict:
+    from api.config import get_embedder_config, get_embedder_type
+
+    embedder_type = embedder_type or get_embedder_type()
+    embedder_config = get_embedder_config()
+    init_kwargs = embedder_config.get("initialize_kwargs", {})
+    model_kwargs = embedder_config.get("model_kwargs", {})
+    return {
+        "embedding_base_url": init_kwargs.get("base_url") or os.environ.get("EMBEDDING_BASE_URL") or os.environ.get("OPENAI_BASE_URL"),
+        "embedding_model": model_kwargs.get("model") or os.environ.get("EMBEDDING_MODEL"),
+        "embedding_dim": int(os.environ.get("EMBEDDING_DIM", "0")) or None,
+        "embedding_normalize": os.environ.get("EMBEDDING_NORMALIZE", "true").lower() in {"1", "true", "yes"},
+        "chunker_version": os.environ.get("CHUNKER_VERSION", CHUNKER_VERSION),
+        "index_schema_version": int(os.environ.get("INDEX_SCHEMA_VERSION", SCHEMA_VERSION)),
+        "embedder_type": embedder_type,
+    }
 
 def count_tokens(text: str, embedder_type: str = None, is_ollama_embedder: bool = None) -> int:
     """
@@ -101,42 +125,44 @@ def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_
         # Ensure the local path exists
         os.makedirs(local_path, exist_ok=True)
 
-        # Prepare the clone URL with access token if provided
+        # Determine auth method: SSH or HTTPS token
+        from api.ssh_auth import is_ssh_url, prepare_ssh_for_repo
+
+        clone_env = os.environ.copy()
         clone_url = repo_url
-        if access_token:
+
+        if is_ssh_url(repo_url):
+            # --- SSH authentication ---
+            logger.info("Detected SSH URL, preparing SSH authentication")
+            ssh_command = prepare_ssh_for_repo(repo_url)
+            clone_env["GIT_SSH_COMMAND"] = ssh_command
+            # Use URL as-is for SSH
+            logger.info(f"Cloning repository via SSH from {repo_url}")
+        elif access_token:
+            # --- HTTPS token authentication ---
             parsed = urlparse(repo_url)
-            # URL-encode the token to handle special characters
             encoded_token = quote(access_token, safe='')
-            # Determine the repository type and format the URL accordingly
             if repo_type == "github":
-                # Format: https://{token}@{domain}/owner/repo.git
-                # Works for both github.com and enterprise GitHub domains
                 clone_url = urlunparse((parsed.scheme, f"{encoded_token}@{parsed.netloc}", parsed.path, '', '', ''))
             elif repo_type == "gitlab":
-                # Format: https://oauth2:{token}@gitlab.com/owner/repo.git
                 clone_url = urlunparse((parsed.scheme, f"oauth2:{encoded_token}@{parsed.netloc}", parsed.path, '', '', ''))
             elif repo_type == "bitbucket":
-                # Bitbucket has two token formats with different auth schemes:
-                #   - HTTP access tokens (prefix "ATCTT") use x-bitbucket-api-token-auth
-                #   - App passwords (deprecated, EOL June 2026) use x-token-auth
-                # Detect by token prefix so existing app password users keep working.
                 if access_token.startswith("ATCTT"):
                     auth_scheme = "x-bitbucket-api-token-auth"
                 else:
                     auth_scheme = "x-token-auth"
-                # Format: https://{auth_scheme}:{token}@bitbucket.org/owner/repo.git
                 clone_url = urlunparse((parsed.scheme, f"{auth_scheme}:{encoded_token}@{parsed.netloc}", parsed.path, '', '', ''))
-
             logger.info("Using access token for authentication")
 
         # Clone the repository
         logger.info(f"Cloning repository from {repo_url} to {local_path}")
         # We use repo_url in the log to avoid exposing the token in logs
         result = subprocess.run(
-            ["git", "clone", "--depth=1", "--single-branch", clone_url, local_path],
+            ["git", "clone", clone_url, local_path],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=clone_env,
         )
 
         logger.info("Repository cloned successfully")
@@ -186,6 +212,11 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
     if embedder_type is None and is_ollama_embedder is not None:
         embedder_type = 'ollama' if is_ollama_embedder else None
     documents = []
+
+    # Parse .wikignore from repo root for file filtering
+    from api.wikignore import parse_wikignore, is_binary_file as wikignore_is_binary
+    wikignore_check = parse_wikignore(path)
+
     # File extensions to look for, prioritizing code files
     code_extensions = [".py", ".js", ".ts", ".java", ".cpp", ".c", ".h", ".hpp", ".go", ".rs",
                        ".jsx", ".tsx", ".html", ".css", ".php", ".swift", ".cs"]
@@ -317,6 +348,17 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
                 continue
 
+            # Check .wikignore and built-in patterns
+            rel_path = os.path.relpath(file_path, path)
+            if wikignore_check(rel_path):
+                logger.debug(f"Ignoring {rel_path}: matched wikignore/built-in pattern")
+                continue
+
+            # Skip binary files
+            if wikignore_is_binary(file_path):
+                logger.debug(f"Ignoring {rel_path}: detected as binary")
+                continue
+
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -358,6 +400,17 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
                 continue
 
+            # Check .wikignore and built-in patterns
+            rel_path = os.path.relpath(file_path, path)
+            if wikignore_check(rel_path):
+                logger.debug(f"Ignoring {rel_path}: matched wikignore/built-in pattern")
+                continue
+
+            # Skip binary files
+            if wikignore_is_binary(file_path):
+                logger.debug(f"Ignoring {rel_path}: detected as binary")
+                continue
+
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -387,75 +440,81 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
     logger.info(f"Found {len(documents)} documents")
     return documents
 
-def prepare_data_pipeline(embedder_type: str = None, is_ollama_embedder: bool = None):
+def _extract_embedding_vectors(result) -> List[List[float]]:
+    """Extract embedding vectors from an embedder result object."""
+    data = getattr(result, "data", None)
+    if data is not None:
+        return [list(item.embedding) for item in data]
+    if isinstance(result, list):
+        return [list(item) for item in result]
+    raise ValueError("Unable to extract embeddings from embedder output")
+
+
+def embed_documents(
+    documents: List[Document],
+    embedder,
+    embedder_type: str = "openai",
+    batch_size: int = 500,
+) -> List[Document]:
+    """Embed a list of chunked documents, attaching vectors in place.
+
+    For Ollama embedders, each document is embedded one at a time.
+    For other embedders, documents are processed in batches.
     """
-    Creates and returns the data transformation pipeline.
+    if embedder_type == "ollama":
+        processor = OllamaDocumentProcessor(embedder=embedder)
+        return processor(documents)
+
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i : i + batch_size]
+        texts = [doc.text for doc in batch]
+        result = embedder(input=texts)
+        vectors = _extract_embedding_vectors(result)
+        for doc, vector in zip(batch, vectors):
+            doc.vector = vector
+
+    return documents
+
+
+def transform_documents_and_save_to_db(
+    documents: List[Document], db_path: str, embedder_type: str = None,
+    is_ollama_embedder: bool = None, already_chunked: bool = False
+) -> List[Document]:
+    """
+    Transforms a list of documents (chunks and embeds) and saves them to a local pickle file.
 
     Args:
-        embedder_type (str, optional): The embedder type ('openai', 'google', 'ollama').
-                                     If None, will be determined from configuration.
-        is_ollama_embedder (bool, optional): DEPRECATED. Use embedder_type instead.
-                                           If None, will be determined from configuration.
+        documents: List of Document objects.
+        db_path: The path to the local pickle file.
+        embedder_type: The embedder type ('openai', 'google', 'ollama').
+        is_ollama_embedder: DEPRECATED. Use embedder_type instead.
+        already_chunked: If True, documents are already chunked (skip splitting).
 
     Returns:
-        adal.Sequential: The data transformation pipeline
+        List of Document objects with embeddings attached.
     """
-    from api.config import get_embedder_config, get_embedder_type
+    from api.config import get_embedder_type
 
-    # Handle backward compatibility
     if embedder_type is None and is_ollama_embedder is not None:
         embedder_type = 'ollama' if is_ollama_embedder else None
-    
-    # Determine embedder type if not specified
+
     if embedder_type is None:
         embedder_type = get_embedder_type()
 
-    splitter = TextSplitter(**configs["text_splitter"])
-    embedder_config = get_embedder_config()
-
     embedder = get_embedder(embedder_type=embedder_type)
 
-    # Choose appropriate processor based on embedder type
-    if embedder_type == 'ollama':
-        # Use Ollama document processor for single-document processing
-        embedder_transformer = OllamaDocumentProcessor(embedder=embedder)
-    else:
-        # Use batch processing for OpenAI and Google embedders
-        batch_size = embedder_config.get("batch_size", 500)
-        embedder_transformer = ToEmbeddings(
-            embedder=embedder, batch_size=batch_size
-        )
+    embedder_config = configs.get("embedder", {})
+    batch_size = embedder_config.get("batch_size", 500)
 
-    data_transformer = adal.Sequential(
-        splitter, embedder_transformer
-    )  # sequential will chain together splitter and embedder
-    return data_transformer
+    # Embed documents
+    embedded = embed_documents(documents, embedder, embedder_type, batch_size)
 
-def transform_documents_and_save_to_db(
-    documents: List[Document], db_path: str, embedder_type: str = None, is_ollama_embedder: bool = None
-) -> LocalDB:
-    """
-    Transforms a list of documents and saves them to a local database.
-
-    Args:
-        documents (list): A list of `Document` objects.
-        db_path (str): The path to the local database file.
-        embedder_type (str, optional): The embedder type ('openai', 'google', 'ollama').
-                                     If None, will be determined from configuration.
-        is_ollama_embedder (bool, optional): DEPRECATED. Use embedder_type instead.
-                                           If None, will be determined from configuration.
-    """
-    # Get the data transformer
-    data_transformer = prepare_data_pipeline(embedder_type, is_ollama_embedder)
-
-    # Save the documents to a local database
-    db = LocalDB()
-    db.register_transformer(transformer=data_transformer, key="split_and_embed")
-    db.load(documents)
-    db.transform(key="split_and_embed")
+    # Save to pickle for caching
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    db.save_state(filepath=db_path)
-    return db
+    with open(db_path, "wb") as f:
+        pickle.dump({"split_and_embed": embedded}, f)
+
+    return embedded
 
 def get_github_file_content(repo_url: str, file_path: str, access_token: str = None) -> str:
     """
@@ -719,13 +778,14 @@ def get_file_content(repo_url: str, file_path: str, repo_type: str = None, acces
 
 class DatabaseManager:
     """
-    Manages the creation, loading, transformation, and persistence of LocalDB instances.
+    Manages the creation, loading, transformation, and persistence of indexed documents.
     """
 
     def __init__(self):
         self.db = None
         self.repo_url_or_path = None
         self.repo_paths = None
+        self.chroma_path = os.path.join(deepwiki_root_path(), "chromadb")
 
     def prepare_database(self, repo_url_or_path: str, repo_type: str = None, access_token: str = None,
                          embedder_type: str = None, is_ollama_embedder: bool = None,
@@ -786,8 +846,8 @@ class DatabaseManager:
         """
         Download and prepare all paths.
         Paths:
-        ~/.adalflow/repos/{owner}_{repo_name} (for url, local path will be the same)
-        ~/.adalflow/databases/{owner}_{repo_name}.pkl
+        ~/.deepwiki/repos/{owner}_{repo_name} (for url, local path will be the same)
+        ~/.deepwiki/databases/{owner}_{repo_name}.pkl
 
         Args:
             repo_type(str): Type of repository
@@ -800,7 +860,7 @@ class DatabaseManager:
             # Strip whitespace to handle URLs with leading/trailing spaces
             repo_url_or_path = repo_url_or_path.strip()
             
-            root_path = get_adalflow_default_root_path()
+            root_path = deepwiki_root_path()
 
             os.makedirs(root_path, exist_ok=True)
             # url
@@ -829,6 +889,7 @@ class DatabaseManager:
                 "save_repo_dir": save_repo_dir,
                 "save_db_file": save_db_file,
             }
+            self.chroma_path = os.path.join(root_path, "chromadb")
             self.repo_url_or_path = repo_url_or_path
             logger.info(f"Repo paths: {self.repo_paths}")
 
@@ -873,13 +934,27 @@ class DatabaseManager:
         # Handle backward compatibility
         if embedder_type is None and is_ollama_embedder is not None:
             embedder_type = 'ollama' if is_ollama_embedder else None
-        # check the database
+        repo_id = _repo_id(self.repo_url_or_path)
+        fingerprint = _embedding_fingerprint(embedder_type)
+        root_path = deepwiki_root_path()
+        meta_store = MetaStore(os.path.join(root_path, "metadata", "deepwiki.sqlite3"))
+        meta_store.assert_compatible(repo_id, fingerprint)
+        meta_store.upsert_repo(
+            repo_id=repo_id,
+            clone_path=self.repo_paths["save_repo_dir"],
+            remote_url=self.repo_url_or_path if self.repo_url_or_path != self.repo_paths["save_repo_dir"] else None,
+            fingerprint=fingerprint,
+        )
+
+        # check the cache
         if self.repo_paths and os.path.exists(self.repo_paths["save_db_file"]):
             logger.info("Loading existing database...")
             try:
-                self.db = LocalDB.load_state(self.repo_paths["save_db_file"])
-                documents = self.db.get_transformed_data(key="split_and_embed")
+                with open(self.repo_paths["save_db_file"], "rb") as f:
+                    cache = pickle.load(f)
+                documents = cache.get("split_and_embed", [])
                 if documents:
+                    documents = enrich_transformed_documents(documents, repo_id)
                     lengths = [_embedding_vector_length(doc) for doc in documents]
                     non_empty = sum(1 for n in lengths if n > 0)
                     empty = len(lengths) - non_empty
@@ -897,6 +972,17 @@ class DatabaseManager:
                             "Existing database contains no usable embeddings. Rebuilding embeddings..."
                         )
                     else:
+                        chroma_store = ChromaStore(
+                            os.path.join(root_path, "chromadb"),
+                            self.repo_url_or_path,
+                        )
+                        sync_index_state(
+                            meta_store,
+                            chroma_store,
+                            repo_id,
+                            self.repo_paths["save_repo_dir"],
+                            documents,
+                        )
                         return documents
             except Exception as e:
                 logger.error(f"Error loading existing database: {e}")
@@ -912,11 +998,23 @@ class DatabaseManager:
             included_dirs=included_dirs,
             included_files=included_files
         )
-        self.db = transform_documents_and_save_to_db(
-            documents, self.repo_paths["save_db_file"], embedder_type=embedder_type
+        chunked_documents = chunk_documents(documents, repo_id)
+        transformed_docs = transform_documents_and_save_to_db(
+            chunked_documents,
+            self.repo_paths["save_db_file"],
+            embedder_type=embedder_type,
+            already_chunked=True,
         )
         logger.info(f"Total documents: {len(documents)}")
-        transformed_docs = self.db.get_transformed_data(key="split_and_embed")
+        transformed_docs = enrich_transformed_documents(transformed_docs, repo_id)
+        chroma_store = ChromaStore(os.path.join(root_path, "chromadb"), self.repo_url_or_path)
+        sync_index_state(
+            meta_store,
+            chroma_store,
+            repo_id,
+            self.repo_paths["save_repo_dir"],
+            transformed_docs,
+        )
         logger.info(f"Total transformed documents: {len(transformed_docs)}")
         return transformed_docs
 

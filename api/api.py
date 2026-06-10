@@ -32,9 +32,11 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Helper function to get adalflow root path
+# Helper function to get deepwiki root path
 def get_adalflow_default_root_path():
-    return os.path.expanduser(os.path.join("~", ".adalflow"))
+    """Backward-compatible wrapper — prefer api.types.deepwiki_root_path for new code."""
+    from api.types import deepwiki_root_path
+    return deepwiki_root_path()
 
 # --- Pydantic Models ---
 class WikiPage(BaseModel):
@@ -145,6 +147,8 @@ class AuthorizationConfig(BaseModel):
     code: str = Field(..., description="Authorization code")
 
 from api.config import configs, WIKI_AUTH_MODE, WIKI_AUTH_CODE
+from api.db.chroma_store import repo_hash
+from api.db.meta_store import MetaStore
 
 @app.get("/lang/config")
 async def get_lang_config():
@@ -405,6 +409,17 @@ app.add_websocket_route("/ws/chat", handle_websocket_chat)
 WIKI_CACHE_DIR = os.path.join(get_adalflow_default_root_path(), "wikicache")
 os.makedirs(WIKI_CACHE_DIR, exist_ok=True)
 
+
+def get_metadata_store() -> MetaStore:
+    return MetaStore(os.path.join(get_adalflow_default_root_path(), "metadata", "deepwiki.sqlite3"))
+
+
+def get_repo_identity(repo: RepoInfo) -> Optional[str]:
+    source = repo.repoUrl or repo.localPath
+    if not source:
+        return None
+    return f"repo_{repo_hash(source.strip())}"
+
 def get_wiki_cache_path(owner: str, repo: str, repo_type: str, language: str) -> str:
     """Generates the file path for a given wiki cache."""
     filename = f"deepwiki_cache_{repo_type}_{owner}_{repo}_{language}.json"
@@ -447,6 +462,7 @@ async def save_wiki_cache(data: WikiCacheRequest) -> bool:
         logger.info(f"Writing cache file to: {cache_path}")
         with open(cache_path, 'w', encoding='utf-8') as f:
             json.dump(payload.model_dump(), f, indent=2)
+        persist_wiki_cache_metadata(data)
         logger.info(f"Wiki cache successfully saved to {cache_path}")
         return True
     except IOError as e:
@@ -455,6 +471,36 @@ async def save_wiki_cache(data: WikiCacheRequest) -> bool:
     except Exception as e:
         logger.error(f"Unexpected error saving wiki cache to {cache_path}: {e}", exc_info=True)
         return False
+
+
+def persist_wiki_cache_metadata(data: WikiCacheRequest) -> None:
+    repo_id = get_repo_identity(data.repo)
+    if not repo_id:
+        logger.warning("Skipping SQLite wiki metadata save: repoUrl/localPath is missing")
+        return
+
+    store = get_metadata_store()
+    repo = store.get_repo(repo_id)
+    commit_sha = repo["last_indexed_sha"] if repo and repo["last_indexed_sha"] else "unknown"
+    pages = []
+
+    ordered_pages = list(data.generated_pages.values())
+    if data.wiki_structure and data.wiki_structure.pages:
+        structure_order = {page.id: index for index, page in enumerate(data.wiki_structure.pages)}
+        ordered_pages.sort(key=lambda page: structure_order.get(page.id, len(structure_order)))
+
+    for index, page in enumerate(ordered_pages):
+        pages.append(
+            {
+                "id": page.id,
+                "title": page.title,
+                "content": page.content,
+                "page_order": index,
+                "file_paths": page.filePaths,
+            }
+        )
+
+    store.replace_wiki_pages(repo_id, pages, commit_sha)
 
 # --- Wiki Cache API Endpoints ---
 

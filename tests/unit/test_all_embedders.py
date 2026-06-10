@@ -269,27 +269,25 @@ class TestDataPipelineFunctions:
                 assert isinstance(token_count, int), "Token count should be an integer"
                 assert token_count > 0, "Token count should be positive"
 
-    def test_prepare_data_pipeline(self, is_ollama=None):
-        """Test data pipeline preparation with different embedder types."""
-        from api.data_pipeline import prepare_data_pipeline
-        
+    def test_get_embedder(self, is_ollama=None):
+        """Test embedder creation with different embedder types."""
+        from api.tools.embedder import get_embedder
+
         if is_ollama is not None:
             try:
-                pipeline = prepare_data_pipeline(is_ollama_embedder=is_ollama)
-                assert pipeline is not None, "Data pipeline should be created"
-                assert hasattr(pipeline, '__call__'), "Pipeline should be callable"
+                embedder = get_embedder(embedder_type='ollama' if is_ollama else 'openai')
+                assert embedder is not None, "Embedder should be created"
+                assert hasattr(embedder, '__call__'), "Embedder should be callable"
             except Exception as e:
-                # Some configurations might fail if services aren't available
-                logger.warning(f"Pipeline creation failed (might be expected): {e}")
+                logger.warning(f"Embedder creation failed (might be expected): {e}")
         else:
-            # Test with all values
-            for is_ollama_val in [None, True, False]:
+            for embedder_type in ['openai', 'ollama']:
                 try:
-                    pipeline = prepare_data_pipeline(is_ollama_embedder=is_ollama_val)
-                    assert pipeline is not None, "Data pipeline should be created"
-                    assert hasattr(pipeline, '__call__'), "Pipeline should be callable"
+                    embedder = get_embedder(embedder_type=embedder_type)
+                    assert embedder is not None, "Embedder should be created"
+                    assert hasattr(embedder, '__call__'), "Embedder should be callable"
                 except Exception as e:
-                    logger.warning(f"Pipeline creation failed for is_ollama={is_ollama_val}: {e}")
+                    logger.warning(f"Embedder creation failed for {embedder_type}: {e}")
 
 
 class TestRAGIntegration:
@@ -390,8 +388,8 @@ class TestIssuesIdentified:
             logger.warning(f"RAG test failed: {e}")
 
     def test_binary_assumptions_in_data_pipeline(self):
-        """Test binary assumptions in data pipeline functions."""
-        from api.data_pipeline import prepare_data_pipeline, count_tokens
+        """Test token counting in data pipeline functions."""
+        from api.data_pipeline import count_tokens
         
         # These functions currently only consider is_ollama_embedder parameter
         # This test documents the issue and will verify fixes
@@ -403,15 +401,15 @@ class TestIssuesIdentified:
         assert isinstance(token_count_ollama, int)
         assert isinstance(token_count_other, int)
         
-        # prepare_data_pipeline only accepts is_ollama_embedder parameter
+        # embedder creation based on embedder type
+        from api.tools.embedder import get_embedder
         try:
-            pipeline_ollama = prepare_data_pipeline(is_ollama_embedder=True)
-            pipeline_other = prepare_data_pipeline(is_ollama_embedder=False)
-            
-            assert pipeline_ollama is not None
-            assert pipeline_other is not None
+            embedder_openai = get_embedder(embedder_type='openai')
+            embedder_ollama = get_embedder(embedder_type='ollama')
+            assert embedder_openai is not None
+            assert embedder_ollama is not None
         except Exception as e:
-            logger.warning(f"Pipeline creation failed: {e}")
+            logger.warning(f"Embedder creation failed: {e}")
 
 
 def run_all_tests():
@@ -455,11 +453,11 @@ def run_all_tests():
             f"TestDataPipelineFunctions.test_count_tokens[{embedder_type}]"
         )
     
-    # Test pipeline preparation with different types
+    # Test embedder creation with different types
     for is_ollama in [None, True, False]:
         runner.run_test(
-            lambda ol=is_ollama: pipeline_test.test_prepare_data_pipeline(ol),
-            f"TestDataPipelineFunctions.test_prepare_data_pipeline[{is_ollama}]"
+            lambda ol=is_ollama: pipeline_test.test_get_embedder(ol),
+            f"TestDataPipelineFunctions.test_get_embedder[{is_ollama}]"
         )
     
     # Test environment variable handling

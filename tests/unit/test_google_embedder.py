@@ -109,30 +109,27 @@ def test_adalflow_embedder():
         return False
 
 def test_document_processing():
-    """Test document processing with Google embedder."""
+    """Test document processing with Google embedder using new API."""
     logger.info("Testing document processing with Google embedder...")
-    
+
     try:
-        from adalflow.core.types import Document
-        from adalflow.components.data_process import ToEmbeddings
+        from api.types import Document
+        from api.data_pipeline import embed_documents
         from api.tools.embedder import get_embedder
-        
+
         # Create some test documents
         docs = [
             Document(text="This is a test document.", meta_data={"file_path": "test1.txt"}),
             Document(text="Another test document here.", meta_data={"file_path": "test2.txt"})
         ]
-        
+
         # Get the Google embedder
         embedder = get_embedder(embedder_type='google')
         logger.info(f"Embedder type: {type(embedder)}")
-        
-        # Process documents
-        embedder_transformer = ToEmbeddings(embedder=embedder, batch_size=100)
-        
-        # Transform documents
+
+        # Process documents with new embed_documents function
         logger.info("Transforming documents...")
-        transformed_docs = embedder_transformer(docs)
+        transformed_docs = embed_documents(docs, embedder, embedder_type='google', batch_size=100)
         
         logger.info(f"Transformed docs type: {type(transformed_docs)}")
         logger.info(f"Number of transformed docs: {len(transformed_docs)}")

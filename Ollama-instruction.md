@@ -91,13 +91,13 @@ cp api/config/embedder.ollama.json.bak api/config/embedder.json
    ```bash
    # For regular use
    docker run -p 3000:3000 -p 8001:8001 --name deepwiki \
-     -v ~/.adalflow:/root/.adalflow \
+     -v ~/.deepwiki:/root/.deepwiki \
      -e OLLAMA_HOST=your_ollama_host \
      deepwiki:ollama-local
    
    # For local repository analysis
    docker run -p 3000:3000 -p 8001:8001 --name deepwiki \
-     -v ~/.adalflow:/root/.adalflow \
+     -v ~/.deepwiki:/root/.deepwiki \
      -e OLLAMA_HOST=your_ollama_host \
      -v /path/to/your/repo:/app/local-repos/repo-name \
      deepwiki:ollama-local

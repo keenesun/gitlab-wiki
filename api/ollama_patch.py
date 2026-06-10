@@ -2,11 +2,11 @@ from typing import Sequence, List
 from copy import deepcopy
 from tqdm import tqdm
 import logging
-import adalflow as adal
-from adalflow.core.types import Document
-from adalflow.core.component import DataComponent
+from typing import Any
 import requests
 import os
+
+from api.types import Document
 
 # Configure logging
 from api.logging_config import setup_logging
@@ -59,13 +59,12 @@ def check_ollama_model_exists(model_name: str, ollama_host: str = None) -> bool:
         logger.warning(f"Error checking Ollama model availability: {e}")
         return False
 
-class OllamaDocumentProcessor(DataComponent):
+class OllamaDocumentProcessor:
     """
     Process documents for Ollama embeddings by processing one document at a time.
-    Adalflow Ollama Client does not support batch embedding, so we need to process each document individually.
+    Ollama does not support batch embedding, so we process each document individually.
     """
-    def __init__(self, embedder: adal.Embedder) -> None:
-        super().__init__()
+    def __init__(self, embedder: Any) -> None:
         self.embedder = embedder
 
     def __call__(self, documents: Sequence[Document]) -> Sequence[Document]:
