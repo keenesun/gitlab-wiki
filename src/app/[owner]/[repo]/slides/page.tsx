@@ -5,7 +5,6 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { FaArrowLeft, FaSync, FaDownload, FaArrowRight, FaArrowUp, FaTimes } from 'react-icons/fa';
 import ThemeToggle from '@/components/theme-toggle';
-import { useLanguage } from '@/contexts/LanguageContext';
 import { RepoInfo } from '@/types/repoinfo';
 import getRepoUrl from '@/utils/getRepoUrl';
 
@@ -62,10 +61,7 @@ export default function SlidesPage() {
   const customModelParam = searchParams.get('custom_model') || '';
   const language = searchParams.get('language') || 'en';
 
-  // Import language context for translations
-  const { messages } = useLanguage();
-
-  // Initialize repo info with useMemo to prevent unnecessary re-renders
+  // Import language context for translations  // Initialize repo info with useMemo to prevent unnecessary re-renders
   const repoInfo = useMemo<RepoInfo>(() => ({
     owner,
     repo,
@@ -424,7 +420,6 @@ Give me the numbered list with brief descriptions for each slide. Be creative bu
       }
 
       console.log(`Found ${slideMatches.length} slides in the plan`);
-
 
       // Now generate each slide one by one
       const generatedSlides: Slide[] = [];
@@ -880,7 +875,7 @@ Please return ONLY the HTML with no markdown formatting or code blocks. Just the
       setIsLoading(false);
       setLoadingMessage(undefined);
     }
-  }, [owner, repo, repoInfo, token, providerParam, modelParam, isCustomModelParam, customModelParam, language, isLoading, messages.loading, cachedWikiContent, fetchCachedWikiContent]);
+  }, [owner, repo, repoInfo, token, providerParam, modelParam, isCustomModelParam, customModelParam, language, isLoading, cachedWikiContent, fetchCachedWikiContent]);
 
   // Export slides content
   const exportSlides = useCallback(async () => {

@@ -19,39 +19,18 @@ interface ProcessedProjectsProps {
   showHeader?: boolean;
   maxItems?: number;
   className?: string;
-  messages?: Record<string, Record<string, string>>; // Translation messages with proper typing
 }
 
 export default function ProcessedProjects({ 
   showHeader = true, 
   maxItems, 
   className = "",
-  messages 
 }: ProcessedProjectsProps) {
   const [projects, setProjects] = useState<ProcessedProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
-
-  // Default messages fallback
-  const defaultMessages = {
-    title: 'Processed Wiki Projects',
-    searchPlaceholder: 'Search projects by name, owner, or repository...',
-    noProjects: 'No projects found in the server cache. The cache might be empty or the server encountered an issue.',
-    noSearchResults: 'No projects match your search criteria.',
-    processedOn: 'Processed on:',
-    loadingProjects: 'Loading projects...',
-    errorLoading: 'Error loading projects:',
-    backToHome: 'Back to Home'
-  };
-
-  const t = (key: string) => {
-    if (messages?.projects?.[key]) {
-      return messages.projects[key];
-    }
-    return defaultMessages[key as keyof typeof defaultMessages] || key;
-  };
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -102,7 +81,7 @@ export default function ProcessedProjects({
   };
 
   const handleDelete = async (project: ProcessedProject) => {
-    if (!confirm(`Are you sure you want to delete project ${project.name}?`)) {
+    if (!confirm(`确定要删除项目 ${project.name}？`)) {
       return;
     }
     try {
@@ -123,7 +102,7 @@ export default function ProcessedProjects({
       setProjects(prev => prev.filter(p => p.id !== project.id));
     } catch (e: unknown) {
       console.error('Failed to delete project:', e);
-      alert(`Failed to delete project: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      alert(`删除项目失败: ${e instanceof Error ? e.message : '未知错误'}`);
     }
   };
 
@@ -132,9 +111,9 @@ export default function ProcessedProjects({
       {showHeader && (
         <header className="mb-6">
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-[var(--accent-primary)]">{t('title')}</h1>
+            <h1 className="text-3xl font-bold text-[var(--accent-primary)]">已处理的Wiki项目</h1>
             <Link href="/" className="text-[var(--accent-primary)] hover:underline">
-              {t('backToHome')}
+              返回首页
             </Link>
           </div>
         </header>
@@ -148,7 +127,7 @@ export default function ProcessedProjects({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('searchPlaceholder')}
+            placeholder="按项目名称、所有者或仓库搜索..."
             className="input-japanese block w-full pl-4 pr-12 py-2.5 border border-[var(--border-color)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)]"
           />
           {searchQuery && (
@@ -188,8 +167,8 @@ export default function ProcessedProjects({
         </div>
       </div>
 
-      {isLoading && <p className="text-[var(--muted)]">{t('loadingProjects')}</p>}
-      {error && <p className="text-[var(--highlight)]">{t('errorLoading')} {error}</p>}
+      {isLoading && <p className="text-[var(--muted)]">正在加载项目...</p>}
+      {error && <p className="text-[var(--highlight)]">加载项目时出错: {error}</p>}
 
       {!isLoading && !error && filteredProjects.length > 0 && (
         <div className={viewMode === 'card' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'space-y-2'}>
@@ -220,7 +199,7 @@ export default function ProcessedProjects({
                     </span>
                   </div>
                   <p className="text-xs text-[var(--muted)]">
-                    {t('processedOn')} {new Date(project.submittedAt).toLocaleDateString()}
+                    处理时间: {new Date(project.submittedAt).toLocaleDateString()}
                   </p>
                 </Link>
               </div>
@@ -243,7 +222,7 @@ export default function ProcessedProjects({
                       {project.name}
                     </h3>
                     <p className="text-xs text-[var(--muted)] mt-1">
-                      {t('processedOn')} {new Date(project.submittedAt).toLocaleDateString()} • {project.repo_type} • {project.language}
+                      处理时间: {new Date(project.submittedAt).toLocaleDateString()} • {project.repo_type} • {project.language}
                     </p>
                   </div>
                   <div className="flex gap-2 ml-4">
@@ -259,11 +238,11 @@ export default function ProcessedProjects({
       )}
 
       {!isLoading && !error && projects.length > 0 && filteredProjects.length === 0 && searchQuery && (
-        <p className="text-[var(--muted)]">{t('noSearchResults')}</p>
+        <p className="text-[var(--muted)]">没有项目符合您的搜索条件。</p>
       )}
 
       {!isLoading && !error && projects.length === 0 && (
-        <p className="text-[var(--muted)]">{t('noProjects')}</p>
+        <p className="text-[var(--muted)]">服务器缓存中未找到项目。缓存可能为空或服务器遇到问题。</p>
       )}
     </div>
   );

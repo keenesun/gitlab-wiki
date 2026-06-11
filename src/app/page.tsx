@@ -11,8 +11,6 @@ import ProcessedProjects from '@/components/ProcessedProjects';
 import { extractUrlPath, extractUrlDomain } from '@/utils/urlDecoder';
 import { useProcessedProjects } from '@/hooks/useProcessedProjects';
 
-import { useLanguage } from '@/contexts/LanguageContext';
-
 // Define the demo mermaid charts outside the component
 const DEMO_FLOW_CHART = `graph TD
   A[Code Repository] --> B[DeepWiki]
@@ -44,38 +42,9 @@ const DEMO_SEQUENCE_CHART = `sequenceDiagram
 
 export default function Home() {
   const router = useRouter();
-  const { language, setLanguage, messages, supportedLanguages } = useLanguage();
   const { projects, isLoading: projectsLoading } = useProcessedProjects();
 
-  // Create a simple translation function
-  const t = (key: string, params: Record<string, string | number> = {}): string => {
-    // Split the key by dots to access nested properties
-    const keys = key.split('.');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let value: any = messages;
-
-    // Navigate through the nested properties
-    for (const k of keys) {
-      if (value && typeof value === 'object' && k in value) {
-        value = value[k];
-      } else {
-        // Return the key if the translation is not found
-        return key;
-      }
-    }
-
-    // If the value is a string, replace parameters
-    if (typeof value === 'string') {
-      return Object.entries(params).reduce((acc: string, [paramKey, paramValue]) => {
-        return acc.replace(`{${paramKey}}`, String(paramValue));
-      }, value);
-    }
-
-    // Return the key if the value is not a string
-    return key;
-  };
-
-  const [repositoryInput, setRepositoryInput] = useState('https://github.com/AsyncFuncAI/deepwiki-open');
+  const [repositoryInput, setRepositoryInput] = useState('https://github.com/keenesun/gitlab-wiki');
 
   const REPO_CONFIG_CACHE_KEY = 'deepwikiRepoConfigCache';
 
@@ -87,7 +56,6 @@ export default function Home() {
         const configs = JSON.parse(cachedConfigs);
         const config = configs[repoUrl.trim()];
         if (config) {
-          setSelectedLanguage(config.selectedLanguage || language);
           setIsComprehensiveView(config.isComprehensiveView === undefined ? true : config.isComprehensiveView);
           setProvider(config.provider || '');
           setModel(config.model || '');
@@ -138,17 +106,10 @@ export default function Home() {
   const [accessToken, setAccessToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState<string>(language);
-
-  // Authentication state
   const [authRequired, setAuthRequired] = useState<boolean>(false);
   const [authCode, setAuthCode] = useState<string>('');
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
-  // Sync the language context with the selectedLanguage state
-  useEffect(() => {
-    setLanguage(selectedLanguage);
-  }, [selectedLanguage, setLanguage]);
 
   // Fetch authentication status on component mount
   useEffect(() => {
@@ -311,7 +272,6 @@ export default function Home() {
       if (currentRepoUrl) {
         const existingConfigs = JSON.parse(localStorage.getItem(REPO_CONFIG_CACHE_KEY) || '{}');
         const configToSave = {
-          selectedLanguage,
           isComprehensiveView,
           provider,
           model,
@@ -377,7 +337,7 @@ export default function Home() {
     }
 
     // Add language parameter
-    params.append('language', selectedLanguage);
+    params.append('language', 'zh');
 
     // Add comprehensive parameter
     params.append('comprehensive', isComprehensiveView.toString());
@@ -400,13 +360,13 @@ export default function Home() {
               <FaWikipediaW className="text-2xl text-white" />
             </div>
             <div className="mr-6">
-              <h1 className="text-xl md:text-2xl font-bold text-[var(--accent-primary)]">{t('common.appName')}</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-[var(--accent-primary)]">{"DeepWiki-Open"}</h1>
               <div className="flex flex-wrap items-baseline gap-x-2 md:gap-x-3 mt-0.5">
-                <p className="text-xs text-[var(--muted)] whitespace-nowrap">{t('common.tagline')}</p>
+                <p className="text-xs text-[var(--muted)] whitespace-nowrap">{"AI驱动的文档"}</p>
                 <div className="hidden md:inline-block">
                   <Link href="/wiki/projects"
                     className="text-xs font-medium text-[var(--accent-primary)] hover:text-[var(--highlight)] hover:underline whitespace-nowrap">
-                    {t('nav.wikiProjects')}
+                    {"项目列表"}
                   </Link>
                 </div>
               </div>
@@ -421,7 +381,7 @@ export default function Home() {
                   type="text"
                   value={repositoryInput}
                   onChange={handleRepositoryInputChange}
-                  placeholder={t('form.repoPlaceholder') || "owner/repo, GitHub/GitLab/BitBucket URL, or local folder path"}
+                  placeholder={"所有者/仓库或GitHub/GitLab/Bitbucket URL" || "owner/repo, GitHub/GitLab/BitBucket URL, or local folder path"}
                   className="input-japanese block w-full pl-10 pr-3 py-2.5 border-[var(--border-color)] rounded-lg bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
                 {error && (
@@ -435,7 +395,7 @@ export default function Home() {
                 className="btn-japanese px-6 py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? t('common.processing') : t('common.generateWiki')}
+                {isSubmitting ? "处理中..." : "生成Wiki"}
               </button>
             </div>
           </form>
@@ -445,9 +405,6 @@ export default function Home() {
             isOpen={isConfigModalOpen}
             onClose={() => setIsConfigModalOpen(false)}
             repositoryInput={repositoryInput}
-            selectedLanguage={selectedLanguage}
-            setSelectedLanguage={setSelectedLanguage}
-            supportedLanguages={supportedLanguages}
             isComprehensiveView={isComprehensiveView}
             setIsComprehensiveView={setIsComprehensiveView}
             provider={provider}
@@ -496,8 +453,8 @@ export default function Home() {
                     <FaWikipediaW className="text-5xl text-[var(--accent-primary)] relative z-10" />
                   </div>
                   <div className="text-center sm:text-left">
-                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{t('projects.existingProjects')}</h2>
-                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{t('projects.browseExisting')}</p>
+                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{"现有项目"}</h2>
+                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{"浏览现有项目"}</p>
                   </div>
                 </div>
               </div>
@@ -506,7 +463,6 @@ export default function Home() {
               <ProcessedProjects
                 showHeader={false}
                 maxItems={6}
-                messages={messages}
                 className="w-full"
               />
             </div>
@@ -520,13 +476,13 @@ export default function Home() {
                     <FaWikipediaW className="text-5xl text-[var(--accent-primary)] relative z-10" />
                   </div>
                   <div className="text-center sm:text-left">
-                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{t('home.welcome')}</h2>
-                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{t('home.welcomeTagline')}</p>
+                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{"欢迎使用DeepWiki"}</h2>
+                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{"为代码仓库提供AI驱动的文档"}</p>
                   </div>
                 </div>
 
                 <p className="text-[var(--foreground)] text-center mb-8 text-lg leading-relaxed">
-                  {t('home.description')}
+                  {"只需一次点击，即可从GitHub、GitLab或Bitbucket仓库生成全面的文档。"}
                 </p>
               </div>
 
@@ -539,9 +495,9 @@ export default function Home() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              {t('home.quickStart')}
+              {"快速开始"}
             </h3>
-            <p className="text-sm text-[var(--foreground)] mb-3">{t('home.enterRepoUrl')}</p>
+            <p className="text-sm text-[var(--foreground)] mb-3">{"请以下列格式之一输入仓库URL："}</p>
             <div className="grid grid-cols-1 gap-3 text-xs text-[var(--muted)]">
               <div
                 className="bg-[var(--background)]/70 p-3 rounded border border-[var(--border-color)] font-mono overflow-x-hidden whitespace-nowrap"
@@ -572,21 +528,21 @@ export default function Home() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
-              <h3 className="text-base font-semibold text-[var(--foreground)] font-serif">{t('home.advancedVisualization')}</h3>
+              <h3 className="text-base font-semibold text-[var(--foreground)] font-serif">{"使用Mermaid图表进行高级可视化"}</h3>
             </div>
             <p className="text-sm text-[var(--foreground)] mb-5 leading-relaxed">
-              {t('home.diagramDescription')}
+              {"DeepWiki自动生成交互式图表，帮助您理解代码结构和关系："}
             </p>
 
             {/* Diagrams with improved layout */}
             <div className="grid grid-cols-1 gap-6">
               <div className="bg-[var(--card-bg)] p-4 rounded-lg border border-[var(--border-color)] shadow-custom">
-                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{t('home.flowDiagram')}</h4>
+                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{"流程图"}</h4>
                 <Mermaid chart={DEMO_FLOW_CHART} />
               </div>
 
               <div className="bg-[var(--card-bg)] p-4 rounded-lg border border-[var(--border-color)] shadow-custom">
-                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{t('home.sequenceDiagram')}</h4>
+                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{"序列图"}</h4>
                 <Mermaid chart={DEMO_SEQUENCE_CHART} />
               </div>
             </div>
@@ -599,7 +555,7 @@ export default function Home() {
       <footer className="max-w-6xl mx-auto mt-8 flex flex-col gap-4 w-full">
         <div
           className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-[var(--card-bg)] rounded-lg p-4 border border-[var(--border-color)] shadow-custom">
-          <p className="text-[var(--muted)] text-sm font-serif">{t('footer.copyright')}</p>
+          <p className="text-[var(--muted)] text-sm font-serif">{"DeepWiki - 为代码仓库提供AI驱动的文档"}</p>
 
           <div className="flex items-center gap-6">
             <div className="flex items-center space-x-5">

@@ -486,6 +486,4 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
   );
 };
 
-
-
 export default Mermaid;

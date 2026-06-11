@@ -19,7 +19,7 @@ import logging
 import backoff
 
 # optional import
-from adalflow.utils.lazy_import import safe_import, OptionalPackages
+from api.model_client import safe_import, OptionalPackages
 
 import sys
 
@@ -52,15 +52,14 @@ from openai.types import (
 )
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import (
+from api.model_client import ModelClient, parse_embedding_response
+from api.model_types import (
     ModelType,
     EmbedderOutput,
     TokenLogProb,
     CompletionUsage,
     GeneratorOutput,
 )
-from adalflow.components.model_client.utils import parse_embedding_response
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")

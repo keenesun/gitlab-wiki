@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useLanguage } from '@/contexts/LanguageContext';
 import UserSelector from './UserSelector';
 import TokenInput from './TokenInput';
 
@@ -11,11 +10,6 @@ interface ConfigurationModalProps {
 
   // Repository input
   repositoryInput: string;
-
-  // Language selection
-  selectedLanguage: string;
-  setSelectedLanguage: (value: string) => void;
-  supportedLanguages: Record<string, string>;
 
   // Wiki type options
   isComprehensiveView: boolean;
@@ -64,9 +58,6 @@ export default function ConfigurationModal({
   isOpen,
   onClose,
   repositoryInput,
-  selectedLanguage,
-  setSelectedLanguage,
-  supportedLanguages,
   isComprehensiveView,
   setIsComprehensiveView,
   provider,
@@ -95,10 +86,7 @@ export default function ConfigurationModal({
   authCode,
   setAuthCode,
   isAuthLoading
-}: ConfigurationModalProps) {
-  const { messages: t } = useLanguage();
-
-  // Show token section state
+}: ConfigurationModalProps) {  // Show token section state
   const [showTokenSection, setShowTokenSection] = useState(false);
 
   if (!isOpen) return null;
@@ -110,7 +98,7 @@ export default function ConfigurationModal({
           {/* Modal header with close button */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)]">
             <h3 className="text-lg font-medium text-[var(--accent-primary)]">
-              <span className="text-[var(--accent-primary)]">{t.form?.configureWiki || 'Configure Wiki'}</span>
+              <span className="text-[var(--accent-primary)]">{"配置Wiki"}</span>
             </h3>
             <button
               type="button"
@@ -128,34 +116,17 @@ export default function ConfigurationModal({
             {/* Repository info */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
-                {t.form?.repository || 'Repository'}
+                {"仓库"}
               </label>
               <div className="bg-[var(--background)]/70 p-3 rounded-md border border-[var(--border-color)] text-sm text-[var(--foreground)]">
                 {repositoryInput}
               </div>
             </div>
 
-            {/* Language selection */}
-            <div className="mb-4">
-              <label htmlFor="language-select" className="block text-sm font-medium text-[var(--foreground)] mb-2">
-                {t.form?.wikiLanguage || 'Wiki Language'}
-              </label>
-              <select
-                id="language-select"
-                value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
-                className="input-japanese block w-full px-3 py-2 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
-              >
-                {
-                  Object.entries(supportedLanguages).map(([key, value])=> <option key={key} value={key}>{value}</option>)
-                }
-              </select>
-            </div>
-
             {/* Wiki Type Selector - more compact version */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
-                {t.form?.wikiType || 'Wiki Type'}
+                {"Wiki类型"}
               </label>
               <div className="flex gap-3">
                 <button
@@ -169,9 +140,9 @@ export default function ConfigurationModal({
                 >
                   <div className="flex items-center">
                     <div className="text-left">
-                      <div className="font-medium text-sm">{t.form?.comprehensive || 'Comprehensive'}</div>
+                      <div className="font-medium text-sm">{"全面型"}</div>
                       <div className="text-xs opacity-80">
-                        {t.form?.comprehensiveDescription || 'Detailed wiki with structured sections'}
+                        {"包含结构化章节和更多页面的详细Wiki"}
                       </div>
                     </div>
                   </div>
@@ -193,9 +164,9 @@ export default function ConfigurationModal({
                 >
                   <div className="flex items-center">
                     <div className="text-left">
-                      <div className="font-medium text-sm">{t.form?.concise || 'Concise'}</div>
+                      <div className="font-medium text-sm">{"简洁型"}</div>
                       <div className="text-xs opacity-80">
-                        {t.form?.conciseDescription || 'Simplified wiki with fewer pages'}
+                        {"页面更少，仅包含核心信息的简化Wiki"}
                       </div>
                     </div>
                   </div>
@@ -251,7 +222,7 @@ export default function ConfigurationModal({
             {!isAuthLoading && authRequired && (
               <div className="mb-4 p-4 bg-[var(--background)]/50 rounded-md border border-[var(--border-color)]">
                 <label htmlFor="authCode" className="block text-sm font-medium text-[var(--foreground)] mb-2">
-                  {t.form?.authorizationCode || 'Authorization Code'}
+                  {"授权码"}
                 </label>
                 <input
                   type="password"
@@ -267,7 +238,7 @@ export default function ConfigurationModal({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                   {t.form?.authorizationRequired || 'Authentication is required to generate the wiki.'}
+                   {"生成wiki页面需要填写授权码"}
                 </div>
               </div>
             )}
@@ -280,7 +251,7 @@ export default function ConfigurationModal({
               onClick={onClose}
               className="px-4 py-2 text-sm font-medium rounded-md border border-[var(--border-color)]/50 text-[var(--muted)] bg-transparent hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
             >
-              {t.common?.cancel || 'Cancel'}
+              {"取消"}
             </button>
             <button
               type="button"
@@ -288,7 +259,7 @@ export default function ConfigurationModal({
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium rounded-md border border-transparent bg-[var(--accent-primary)]/90 text-white hover:bg-[var(--accent-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? (t.common?.processing || 'Processing...') : (t.common?.generateWiki || 'Generate Wiki')}
+              {isSubmitting ? ("处理中...") : ("生成Wiki")}
             </button>
           </div>
         </div>

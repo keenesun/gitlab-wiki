@@ -1,7 +1,6 @@
 'use client';
 
 import React, {useEffect, useState} from 'react';
-import {useLanguage} from '@/contexts/LanguageContext';
 import UserSelector from './UserSelector';
 import WikiTypeSelector from './WikiTypeSelector';
 import TokenInput from './TokenInput';
@@ -75,10 +74,7 @@ export default function ModelSelectionModal({
   showWikiType = true,
   showTokenInput = false,
   repositoryType = 'github',
-}: ModelSelectionModalProps) {
-  const { messages: t } = useLanguage();
-
-  // Local state for form values (to only apply changes when the user clicks "Submit")
+}: ModelSelectionModalProps) {  // Local state for form values (to only apply changes when the user clicks "Submit")
   const [localProvider, setLocalProvider] = useState(provider);
   const [localModel, setLocalModel] = useState(model);
   const [localIsCustomModel, setLocalIsCustomModel] = useState(isCustomModel);
@@ -142,7 +138,7 @@ export default function ModelSelectionModal({
           {/* Modal header with close button */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)]">
             <h3 className="text-lg font-medium text-[var(--accent-primary)]">
-              <span className="text-[var(--accent-primary)]">{t.form?.modelSelection || 'Model Selection'}</span>
+              <span className="text-[var(--accent-primary)]">{"模型选择"}</span>
             </h3>
             <button
               type="button"
@@ -213,7 +209,7 @@ export default function ModelSelectionModal({
             {!isAuthLoading && authRequired && (
                 <div className="mb-4 p-4 bg-[var(--background)]/50 rounded-md border border-[var(--border-color)]">
                   <label htmlFor="authCode" className="block text-sm font-medium text-[var(--foreground)] mb-2">
-                    {t.form?.authorizationCode || 'Authorization Code'}
+                    {"授权码"}
                   </label>
                   <input
                       type="password"
@@ -229,7 +225,7 @@ export default function ModelSelectionModal({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {t.form?.authorizationRequired || 'Authentication is required to generate the wiki.'}
+                    {"生成wiki页面需要填写授权码"}
                   </div>
                 </div>
             )}
@@ -242,14 +238,14 @@ export default function ModelSelectionModal({
               onClick={onClose}
               className="px-4 py-2 text-sm font-medium rounded-md border border-[var(--border-color)]/50 text-[var(--muted)] bg-transparent hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
             >
-              {t.common?.cancel || 'Cancel'}
+              {"取消"}
             </button>
             <button
               type="button"
               onClick={handleApply}
               className="px-4 py-2 text-sm font-medium rounded-md border border-transparent bg-[var(--accent-primary)]/90 text-white hover:bg-[var(--accent-primary)] transition-colors"
             >
-              {t.common?.submit || 'Submit'}
+              {"提交"}
             </button>
           </div>
         </div>

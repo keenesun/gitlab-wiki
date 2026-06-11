@@ -5,8 +5,8 @@ import logging
 import backoff
 from typing import Dict, Any, Optional, List, Sequence
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import ModelType, EmbedderOutput
+from api.model_client import ModelClient
+from api.model_types import ModelType, EmbedderOutput, Embedding
 
 try:
     import google.generativeai as genai
@@ -33,10 +33,10 @@ class GoogleEmbedderClient(ModelClient):
     Example:
         ```python
         from api.google_embedder_client import GoogleEmbedderClient
-        import adalflow as adal
+        from api.tools.embedder import Embedder
 
         client = GoogleEmbedderClient()
-        embedder = adal.Embedder(
+        embedder = Embedder(
             model_client=client,
             model_kwargs={
                 "model": "gemini-embedding-001",
@@ -85,7 +85,7 @@ class GoogleEmbedderClient(ModelClient):
             EmbedderOutput with parsed embeddings
         """
         try:
-            from adalflow.core.types import Embedding
+            from api.model_types import Embedding
             
             embedding_data = []
 

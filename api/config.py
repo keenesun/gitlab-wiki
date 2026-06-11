@@ -14,7 +14,7 @@ from api.bedrock_client import BedrockClient
 from api.google_embedder_client import GoogleEmbedderClient
 from api.azureai_client import AzureAIClient
 from api.dashscope_client import DashscopeClient
-from adalflow import GoogleGenAIClient, OllamaClient
+from api.ollama_client import OllamaClient
 
 # --- Plan-defined LLM env vars (OpenAI-compatible direct path) ---
 # Set LLM_BASE_URL + LLM_API_KEY + LLM_MODEL to use any OpenAI-compatible provider
@@ -71,7 +71,6 @@ CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
 
 # Client class mapping
 CLIENT_CLASSES = {
-    "GoogleGenAIClient": GoogleGenAIClient,
     "GoogleEmbedderClient": GoogleEmbedderClient,
     "OpenAIClient": OpenAIClient,
     "LiteLLMClient" : LiteLLMClient,
@@ -147,9 +146,8 @@ def load_generator_config():
             if provider_config.get("client_class") in CLIENT_CLASSES:
                 provider_config["model_client"] = CLIENT_CLASSES[provider_config["client_class"]]
             # Fall back to default mapping based on provider_id
-            elif provider_id in ["google", "openai", "openrouter", "ollama", "bedrock", "azure", "dashscope", "litellm"]:
+            elif provider_id in ["openai", "openrouter", "ollama", "bedrock", "azure", "dashscope", "litellm"]:
                 default_map = {
-                    "google": GoogleGenAIClient,
                     "openai": OpenAIClient,
                     "litellm": LiteLLMClient,
                     "openrouter": OpenRouterClient,
@@ -396,7 +394,7 @@ if generator_config:
 
 # Update embedder configuration
 if embedder_config:
-    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock", "retriever"]:
+    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock", "embedder_direct", "retriever"]:
         if key in embedder_config:
             configs[key] = embedder_config[key]
 
@@ -431,8 +429,6 @@ def get_model_config(provider="google", model=None):
         raise ValueError(f"Configuration for provider '{provider}' not found")
 
     model_client = provider_config.get("model_client")
-    if not model_client:
-        raise ValueError(f"Model client not specified for provider '{provider}'")
 
     # If model not provided, use default model for the provider
     if not model:

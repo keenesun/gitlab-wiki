@@ -20,7 +20,7 @@ from copy import deepcopy
 from tqdm import tqdm
 
 # optional import
-from adalflow.utils.lazy_import import safe_import, OptionalPackages
+from api.model_client import safe_import, OptionalPackages
 
 openai = safe_import(OptionalPackages.OPENAI.value[0], OptionalPackages.OPENAI.value[1])
 
@@ -38,24 +38,20 @@ from openai.types import (
 )
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import (
+from api.model_client import ModelClient, parse_embedding_response
+from api.model_types import (
     ModelType,
     EmbedderOutput,
     CompletionUsage,
     GeneratorOutput,
-    Document,
     Embedding,
     EmbedderOutputType,
     EmbedderInputType,
-)
-from adalflow.core.component import DataComponent
-from adalflow.core.embedder import (
     BatchEmbedderOutputType,
     BatchEmbedderInputType,
+    DataComponent,
 )
-import adalflow.core.functional as F
-from adalflow.components.model_client.utils import parse_embedding_response
+from api.types import Document
 
 from api.logging_config import setup_logging
 
@@ -730,7 +726,7 @@ class DashScopeEmbedder(DataComponent):
         return output
 
     def _compose_model_kwargs(self, **model_kwargs) -> Dict[str, object]:
-        return F.compose_model_kwargs(self.model_kwargs, model_kwargs)
+        return {**self.model_kwargs, **model_kwargs}
 
 # Batch Embedding Components for DashScope
 class DashScopeBatchEmbedder(DataComponent):

@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { useLanguage } from '@/contexts/LanguageContext';
 import { FaBookOpen, FaList } from 'react-icons/fa';
 
 interface WikiTypeSelectorProps {
@@ -12,13 +11,10 @@ interface WikiTypeSelectorProps {
 const WikiTypeSelector: React.FC<WikiTypeSelectorProps> = ({
   isComprehensiveView,
   setIsComprehensiveView,
-}) => {
-  const { messages: t } = useLanguage();
-
-  return (
+}) => {  return (
     <div className="mb-4">
       <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
-        {t.form?.wikiType || 'Wiki Type'}
+        {"Wiki类型"}
       </label>
       <div className="flex flex-col sm:flex-row gap-3">
         <button
@@ -33,9 +29,9 @@ const WikiTypeSelector: React.FC<WikiTypeSelectorProps> = ({
           <div className="flex items-center">
             <FaBookOpen className="mr-2" />
             <div className="text-left">
-              <div className="font-medium">{t.form?.comprehensive || 'Comprehensive'}</div>
+              <div className="font-medium">{"全面型"}</div>
               <div className="text-xs opacity-80">
-                {t.form?.comprehensiveDescription || 'Detailed wiki with structured sections and more pages'}
+                {"包含结构化章节和更多页面的详细Wiki"}
               </div>
             </div>
           </div>
@@ -58,9 +54,9 @@ const WikiTypeSelector: React.FC<WikiTypeSelectorProps> = ({
           <div className="flex items-center">
             <FaList className="mr-2" />
             <div className="text-left">
-              <div className="font-medium">{t.form?.concise || 'Concise'}</div>
+              <div className="font-medium">{"简洁型"}</div>
               <div className="text-xs opacity-80">
-                {t.form?.conciseDescription || 'Simplified wiki with fewer pages and essential information'}
+                {"页面更少，仅包含核心信息的简化Wiki"}
               </div>
             </div>
           </div>

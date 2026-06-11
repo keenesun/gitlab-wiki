@@ -8,8 +8,8 @@ import botocore
 import backoff
 from typing import Dict, Any, Optional, List, Generator, Union, AsyncGenerator, Sequence
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import ModelType, GeneratorOutput, EmbedderOutput
+from api.model_client import ModelClient
+from api.model_types import ModelType, GeneratorOutput, EmbedderOutput, Embedding
 
 # Configure logging
 from api.logging_config import setup_logging
@@ -275,7 +275,7 @@ class BedrockClient(ModelClient):
 
     def parse_embedding_response(self, response: Any) -> EmbedderOutput:
         """Parse Bedrock embedding response to EmbedderOutput format."""
-        from adalflow.core.types import Embedding
+        from api.model_types import Embedding
 
         try:
             embedding_data: List[Embedding] = []

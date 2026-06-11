@@ -32,11 +32,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Helper function to get deepwiki root path
-def get_adalflow_default_root_path():
-    """Backward-compatible wrapper — prefer api.types.deepwiki_root_path for new code."""
-    from api.types import deepwiki_root_path
-    return deepwiki_root_path()
+from api.types import deepwiki_root_path
 
 # --- Pydantic Models ---
 class WikiPage(BaseModel):
@@ -402,16 +398,16 @@ from api.websocket_wiki import handle_websocket_chat
 app.add_api_route("/chat/completions/stream", chat_completions_stream, methods=["POST"])
 
 # Add the WebSocket endpoint
-app.add_websocket_route("/ws/chat", handle_websocket_chat)
+app.add_api_websocket_route("/ws/chat", handle_websocket_chat)
 
 # --- Wiki Cache Helper Functions ---
 
-WIKI_CACHE_DIR = os.path.join(get_adalflow_default_root_path(), "wikicache")
+WIKI_CACHE_DIR = os.path.join(deepwiki_root_path(), "wikicache")
 os.makedirs(WIKI_CACHE_DIR, exist_ok=True)
 
 
 def get_metadata_store() -> MetaStore:
-    return MetaStore(os.path.join(get_adalflow_default_root_path(), "metadata", "deepwiki.sqlite3"))
+    return MetaStore(os.path.join(deepwiki_root_path(), "metadata", "deepwiki.sqlite3"))
 
 
 def get_repo_identity(repo: RepoInfo) -> Optional[str]:

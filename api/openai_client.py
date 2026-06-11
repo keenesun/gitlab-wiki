@@ -20,7 +20,7 @@ import logging
 import backoff
 
 # optional import
-from adalflow.utils.lazy_import import safe_import, OptionalPackages
+from api.model_client import safe_import, OptionalPackages
 from openai.types.chat.chat_completion import Choice
 
 openai = safe_import(OptionalPackages.OPENAI.value[0], OptionalPackages.OPENAI.value[1])
@@ -40,15 +40,14 @@ from openai.types import (
 )
 from openai.types.chat import ChatCompletionChunk, ChatCompletion, ChatCompletionMessage
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import (
+from api.model_client import ModelClient, parse_embedding_response
+from api.model_types import (
     ModelType,
     EmbedderOutput,
     TokenLogProb,
     CompletionUsage,
     GeneratorOutput,
 )
-from adalflow.components.model_client.utils import parse_embedding_response
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -589,38 +588,10 @@ class OpenAIClient(ModelClient):
 
 # Example usage:
 if __name__ == "__main__":
-    from adalflow.core import Generator
-    from adalflow.utils import setup_env
-
-    # log = get_logger(level="DEBUG")
-
-    setup_env()
-    prompt_kwargs = {"input_str": "What is the meaning of life?"}
-
-    gen = Generator(
-        model_client=OpenAIClient(),
-        model_kwargs={"model": "gpt-4o", "stream": False},
-    )
-    gen_response = gen(prompt_kwargs)
-    print(f"gen_response: {gen_response}")
-
-    # for genout in gen_response.data:
-    #     print(f"genout: {genout}")
-
-    # test that to_dict and from_dict works
-    # model_client = OpenAIClient()
-    # model_client_dict = model_client.to_dict()
-    # from_dict_model_client = OpenAIClient.from_dict(model_client_dict)
-    # assert model_client_dict == from_dict_model_client.to_dict()
-
-
-if __name__ == "__main__":
-    import adalflow as adal
-
-    # setup env or pass the api_key
-    from adalflow.utils import setup_env
-
-    setup_env()
+    # Example: test the OpenAI client directly
+    import os
+    client = OpenAIClient()
+    print(f"OpenAI client initialized. Base URL: {client.base_url}")
 
     openai_llm = adal.Generator(
         model_client=OpenAIClient(), model_kwargs={"model": "gpt-4o"}

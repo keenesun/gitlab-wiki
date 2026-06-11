@@ -1,8 +1,6 @@
 'use client';
 
 import React from 'react';
-import { useLanguage } from '@/contexts/LanguageContext';
-
 interface TokenInputProps {
   selectedPlatform: 'github' | 'gitlab' | 'bitbucket';
   setSelectedPlatform: (value: 'github' | 'gitlab' | 'bitbucket') => void;
@@ -21,10 +19,7 @@ export default function TokenInput({
   showTokenSection = true,
   onToggleTokenSection,
   allowPlatformChange = true
-}: TokenInputProps) {
-  const { messages: t } = useLanguage();
-
-  const platformName = selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1);
+}: TokenInputProps) {  const platformName = selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1);
 
   return (
     <div className="mb-4">
@@ -34,7 +29,7 @@ export default function TokenInput({
           onClick={onToggleTokenSection}
           className="text-sm text-[var(--accent-primary)] hover:text-[var(--highlight)] flex items-center transition-colors border-b border-[var(--border-color)] hover:border-[var(--accent-primary)] pb-0.5 mb-2"
         >
-          {showTokenSection ? t.form?.hideTokens || 'Hide Access Tokens' : t.form?.addTokens || 'Add Access Tokens for Private Repositories'}
+          {showTokenSection ? "- 隐藏访问令牌" : "+ 添加私有仓库访问令牌"}
         </button>
       )}
 
@@ -43,7 +38,7 @@ export default function TokenInput({
           {allowPlatformChange && (
             <div className="mb-3">
               <label className="block text-xs font-medium text-[var(--foreground)] mb-2">
-                {t.form?.selectPlatform || 'Select Platform'}
+                {"选择平台"}
               </label>
               <div className="flex gap-2">
                 <button
@@ -82,14 +77,14 @@ export default function TokenInput({
 
           <div>
             <label htmlFor="access-token" className="block text-xs font-medium text-[var(--foreground)] mb-2">
-              {(t.form?.personalAccessToken || 'Personal Access Token').replace('{platform}', platformName)}
+              {("{platform}个人访问令牌").replace('{platform}', platformName)}
             </label>
             <input
               id="access-token"
               type="password"
               value={accessToken}
               onChange={(e) => setAccessToken(e.target.value)}
-              placeholder={(t.form?.tokenPlaceholder || 'Enter your access token').replace('{platform}', platformName)}
+              placeholder={("输入您的{platform}令牌").replace('{platform}', platformName)}
               className="input-japanese block w-full px-3 py-2 rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)] text-sm"
             />
             <div className="flex items-center mt-2 text-xs text-[var(--muted)]">
@@ -98,7 +93,7 @@ export default function TokenInput({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              {t.form?.tokenSecurityNote || 'Your token is stored locally and never sent to our servers.'}
+              {"令牌仅存储在内存中，从不持久化。"}
             </div>
           </div>
         </div>

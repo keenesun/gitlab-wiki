@@ -4,14 +4,14 @@ from typing import List, Optional
 from urllib.parse import unquote
 
 import google.generativeai as genai
-from adalflow.components.model_client.ollama_client import OllamaClient
-from adalflow.core.types import ModelType
+from api.ollama_client import OllamaClient
+from api.model_types import ModelType
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.config import get_model_config, configs, OPENROUTER_API_KEY, OPENAI_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+from api.config import get_model_config, configs, OPENROUTER_API_KEY, OPENAI_API_KEY, LLM_BASE_URL, LLM_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 from api.data_pipeline import count_tokens, get_file_content
 from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
@@ -300,7 +300,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         # Format conversation history
         conversation_history = ""
-        for turn_id, turn in request_rag.memory().items():
+        for turn_id, turn in request_rag.memory.call().items():
             if not isinstance(turn_id, int) and hasattr(turn, 'user_query') and hasattr(turn, 'assistant_response'):
                 conversation_history += f"<turn>\n<user>{turn.user_query.query_str}</user>\n<assistant>{turn.assistant_response.response_str}</assistant>\n</turn>\n"
 
@@ -416,11 +416,27 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 model_kwargs=model_kwargs,
                 model_type=ModelType.LLM
             )
-        elif request.provider == "azure":
-            logger.info(f"Using Azure AI with model: {request.model}")
+        elif request.provider == "direct":
+            logger.info(f"Using direct OpenAI-compatible protocol with model: {request.model}")
 
-            # Initialize Azure AI client
-            model = AzureAIClient()
+            model = OpenAIClient(
+                base_url=LLM_BASE_URL,
+                api_key=LLM_API_KEY,
+            )
+            model_kwargs = {
+                "model": request.model,
+                "stream": True,
+                "temperature": model_config.get("temperature", 0.7),
+            }
+            if "top_p" in model_config:
+                model_kwargs["top_p"] = model_config["top_p"]
+
+            api_kwargs = model.convert_inputs_to_api_kwargs(
+                input=prompt,
+                model_kwargs=model_kwargs,
+                model_type=ModelType.LLM,
+            )
+        elif request.provider == "azure":
             model_kwargs = {
                 "model": request.model,
                 "stream": True,
@@ -500,6 +516,21 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                     except Exception as e_openai:
                         logger.error(f"Error with Openai API: {str(e_openai)}")
                         yield f"\nError with Openai API: {str(e_openai)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                elif request.provider == "direct":
+                    try:
+                        logger.info("Making direct API call")
+                        response = await model.acall(api_kwargs=api_kwargs, model_type=ModelType.LLM)
+                        async for chunk in response:
+                           choices = getattr(chunk, "choices", [])
+                           if len(choices) > 0:
+                               delta = getattr(choices[0], "delta", None)
+                               if delta is not None:
+                                    text = getattr(delta, "content", None)
+                                    if text is not None:
+                                        yield text
+                    except Exception as e_direct:
+                        logger.error(f"Error with direct API: {str(e_direct)}")
+                        yield f"\nError with direct API: {str(e_direct)}"
                 elif request.provider == "bedrock":
                     try:
                         # Get the response and handle it properly using the previously created api_kwargs

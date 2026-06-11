@@ -7,12 +7,8 @@ import aiohttp
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from adalflow.core.model_client import ModelClient
-from adalflow.core.types import (
-    CompletionUsage,
-    ModelType,
-    GeneratorOutput,
-)
+from api.model_client import ModelClient
+from api.model_types import ModelType, GeneratorOutput, CompletionUsage
 
 log = logging.getLogger(__name__)
 

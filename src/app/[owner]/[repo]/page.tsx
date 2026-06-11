@@ -6,7 +6,6 @@ import Markdown from '@/components/Markdown';
 import ModelSelectionModal from '@/components/ModelSelectionModal';
 import ThemeToggle from '@/components/theme-toggle';
 import WikiTreeView from '@/components/WikiTreeView';
-import { useLanguage } from '@/contexts/LanguageContext';
 import { RepoInfo } from '@/types/repoinfo';
 import getRepoUrl from '@/utils/getRepoUrl';
 import { extractUrlDomain, extractUrlPath } from '@/utils/urlDecoder';
@@ -173,7 +172,6 @@ const createBitbucketHeaders = (bitbucketToken: string): HeadersInit => {
   return headers;
 };
 
-
 export default function RepoWikiPage() {
   // Get route parameters and search params
   const params = useParams();
@@ -209,10 +207,7 @@ export default function RepoWikiPage() {
         ? 'github'
         : searchParams.get('type') || 'github';
 
-  // Import language context for translations
-  const { messages } = useLanguage();
-
-  // Initialize repo info
+  // Import language context for translations  // Initialize repo info
   const repoInfo = useMemo<RepoInfo>(() => ({
     owner,
     repo,
@@ -225,7 +220,7 @@ export default function RepoWikiPage() {
   // State variables
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState<string | undefined>(
-    messages.loading?.initializing || 'Initializing wiki generation...'
+    '初始化Wiki生成...' || 'Initializing wiki generation...'
   );
   const [error, setError] = useState<string | null>(null);
   const [wikiStructure, setWikiStructure] = useState<WikiStructure | undefined>();
@@ -254,7 +249,6 @@ export default function RepoWikiPage() {
   const includedFiles = searchParams.get('included_files') || '';
   const [modelIncludedDirs, setModelIncludedDirs] = useState(includedDirs);
   const [modelIncludedFiles, setModelIncludedFiles] = useState(includedFiles);
-
 
   // Wiki type state - default to comprehensive view
   const isComprehensiveParam = searchParams.get('comprehensive') !== 'false';
@@ -697,7 +691,7 @@ Remember:
 
     try {
       setStructureRequestInProgress(true);
-      setLoadingMessage(messages.loading?.determiningStructure || 'Determining wiki structure...');
+      setLoadingMessage('验证Wiki结构...' || 'Determining wiki structure...');
 
       // Get repository URL
       const repoUrl = getRepoUrl(effectiveRepoInfo);
@@ -1161,7 +1155,7 @@ IMPORTANT:
     } finally {
       setStructureRequestInProgress(false);
     }
-  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, messages.loading, isComprehensiveView]);
+  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, isComprehensiveView]);
 
   // Fetch repository structure using GitHub or GitLab API
   const fetchRepositoryStructure = useCallback(async () => {
@@ -1185,7 +1179,7 @@ IMPORTANT:
 
       // Update loading state
       setIsLoading(true);
-      setLoadingMessage(messages.loading?.fetchingStructure || 'Fetching repository structure...');
+      setLoadingMessage('获取仓库结构...' || 'Fetching repository structure...');
 
       let fileTreeData = '';
       let readmeContent = '';
@@ -1492,7 +1486,7 @@ IMPORTANT:
       // Reset the request in progress flag
       setRequestInProgress(false);
     }
-  }, [owner, repo, determineWikiStructure, currentToken, effectiveRepoInfo, requestInProgress, messages.loading]);
+  }, [owner, repo, determineWikiStructure, currentToken, effectiveRepoInfo, requestInProgress]);
 
   // Function to export wiki content
   const exportWiki = useCallback(async (format: 'markdown' | 'json') => {
@@ -1574,7 +1568,7 @@ IMPORTANT:
 
   const confirmRefresh = useCallback(async (newToken?: string) => {
     setShowModelOptions(false);
-    setLoadingMessage(messages.loading?.clearingCache || 'Clearing server cache...');
+    setLoadingMessage('清除服务器缓存...' || 'Clearing server cache...');
     setIsLoading(true); // Show loading indicator immediately
 
     try {
@@ -1668,7 +1662,7 @@ IMPORTANT:
     setError(null);
     setEmbeddingError(false); // Reset embedding error state
     setIsLoading(true); // Set loading state for refresh
-    setLoadingMessage(messages.loading?.initializing || 'Initializing wiki generation...');
+    setLoadingMessage('初始化Wiki生成...' || 'Initializing wiki generation...');
 
     // Clear any in-progress requests for page content
     activeContentRequests.clear();
@@ -1684,7 +1678,7 @@ IMPORTANT:
     // For now, we rely on the standard loadData flow initiated by resetting effectRan and dependencies.
     // This will re-trigger the main data loading useEffect.
     // No direct call to fetchRepositoryStructure here, let the useEffect handle it based on effectRan.current = false.
-  }, [effectiveRepoInfo, language, messages.loading, activeContentRequests, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
+  }, [effectiveRepoInfo, language, activeContentRequests, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
 
   // Start wiki generation when component mounts
   useEffect(() => {
@@ -1693,7 +1687,7 @@ IMPORTANT:
 
       const loadData = async () => {
         // Try loading from server-side cache first
-        setLoadingMessage(messages.loading?.fetchingCache || 'Checking for cached wiki...');
+        setLoadingMessage('Checking for cached wiki...');
         try {
           const params = new URLSearchParams({
             owner: effectiveRepoInfo.owner,
@@ -1873,7 +1867,7 @@ IMPORTANT:
 
     // Clean up function for this effect is not strictly necessary for loadData,
     // but keeping the main unmount cleanup in the other useEffect
-  }, [effectiveRepoInfo, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, language, fetchRepositoryStructure, messages.loading?.fetchingCache, isComprehensiveView]);
+  }, [effectiveRepoInfo, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, language, fetchRepositoryStructure?.fetchingCache, isComprehensiveView]);
 
   // Save wiki to server-side cache when generation is complete
   useEffect(() => {
@@ -1946,7 +1940,7 @@ IMPORTANT:
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link href="/" className="text-[var(--accent-primary)] hover:text-[var(--highlight)] flex items-center gap-1.5 transition-colors border-b border-[var(--border-color)] hover:border-[var(--accent-primary)] pb-0.5">
-              <FaHome /> {messages.repoPage?.home || 'Home'}
+              <FaHome /> {'首页' || 'Home'}
             </Link>
           </div>
         </div>
@@ -1964,8 +1958,8 @@ IMPORTANT:
               </div>
             </div>
             <p className="text-[var(--foreground)] text-center mb-3 font-serif">
-              {loadingMessage || messages.common?.loading || 'Loading...'}
-              {isExporting && (messages.loading?.preparingDownload || ' Please wait while we prepare your download...')}
+              {loadingMessage || '加载中...' || 'Loading...'}
+              {isExporting && ('请等待，我们正在准备您的下载...' || ' Please wait while we prepare your download...')}
             </p>
 
             {/* Progress bar for page generation */}
@@ -1982,18 +1976,14 @@ IMPORTANT:
                 <p className="text-xs text-[var(--muted)] text-center">
                   {language === 'ja'
                     ? `${wikiStructure.pages.length}ページ中${wikiStructure.pages.length - pagesInProgress.size}ページ完了`
-                    : messages.repoPage?.pagesCompleted
-                        ? messages.repoPage.pagesCompleted
-                            .replace('{completed}', (wikiStructure.pages.length - pagesInProgress.size).toString())
-                            .replace('{total}', wikiStructure.pages.length.toString())
-                        : `${wikiStructure.pages.length - pagesInProgress.size} of ${wikiStructure.pages.length} pages completed`}
+                    : `${wikiStructure.pages.length}页中的${wikiStructure.pages.length - pagesInProgress.size}页已完成`}
                 </p>
 
                 {/* Show list of in-progress pages */}
                 {pagesInProgress.size > 0 && (
                   <div className="mt-4 text-xs">
                     <p className="text-[var(--muted)] mb-2">
-                      {messages.repoPage?.currentlyProcessing || 'Currently processing:'}
+                      {'Currently processing:'}
                     </p>
                     <ul className="text-[var(--foreground)] space-y-1">
                       {Array.from(pagesInProgress).slice(0, 3).map(pageId => {
@@ -2004,9 +1994,7 @@ IMPORTANT:
                         <li className="text-[var(--muted)]">
                           {language === 'ja'
                             ? `...他に${pagesInProgress.size - 3}ページ`
-                            : messages.repoPage?.andMorePages
-                                ? messages.repoPage.andMorePages.replace('{count}', (pagesInProgress.size - 3).toString())
-                                : `...and ${pagesInProgress.size - 3} more`}
+                            : `...还有${pagesInProgress.size - 3}页`}
                         </li>
                       )}
                     </ul>
@@ -2019,14 +2007,14 @@ IMPORTANT:
           <div className="bg-[var(--highlight)]/5 border border-[var(--highlight)]/30 rounded-lg p-5 mb-4 shadow-sm">
             <div className="flex items-center text-[var(--highlight)] mb-3">
               <FaExclamationTriangle className="mr-2" />
-              <span className="font-bold font-serif">{messages.repoPage?.errorTitle || messages.common?.error || 'Error'}</span>
+              <span className="font-bold font-serif">{'错误' || '错误' || 'Error'}</span>
             </div>
             <p className="text-[var(--foreground)] text-sm mb-3">{error}</p>
             <p className="text-[var(--muted)] text-xs">
               {embeddingError ? (
-                messages.repoPage?.embeddingErrorDefault || 'This error is related to the document embedding system used for analyzing your repository. Please verify your embedding model configuration, API keys, and try again. If the issue persists, consider switching to a different embedding provider in the model settings.'
+                'This error is related to the document embedding system used for analyzing your repository. Please verify your embedding model configuration, API keys, and try again. If the issue persists, consider switching to a different embedding provider in the model settings.'
               ) : (
-                messages.repoPage?.errorMessageDefault || 'Please check that your repository exists and is public. Valid formats are "owner/repo", "https://github.com/owner/repo", "https://gitlab.com/owner/repo", "https://bitbucket.org/owner/repo", or local folder paths like "C:\\path\\to\\folder" or "/path/to/folder".'
+                '请检查您的仓库是否存在且为公开仓库。有效格式为 owner/repo、GitHub/GitLab/Bitbucket URL，或本地文件夹路径。'
               )}
             </p>
             <div className="mt-5">
@@ -2035,7 +2023,7 @@ IMPORTANT:
                 className="btn-japanese px-5 py-2 inline-flex items-center gap-1.5"
               >
                 <FaHome className="text-sm" />
-                {messages.repoPage?.backToHome || 'Back to Home'}
+                {'返回首页' || 'Back to Home'}
               </Link>
             </div>
           </div>
@@ -2081,8 +2069,8 @@ IMPORTANT:
                   ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] border border-[var(--accent-primary)]/30'
                   : 'bg-[var(--background)] text-[var(--foreground)] border border-[var(--border-color)]'}`}>
                   {isComprehensiveView
-                    ? (messages.form?.comprehensive || 'Comprehensive')
-                    : (messages.form?.concise || 'Concise')}
+                    ? ('全面型' || 'Comprehensive')
+                    : ('简洁型' || 'Concise')}
                 </span>
               </div>
 
@@ -2094,7 +2082,7 @@ IMPORTANT:
                   className="flex items-center w-full text-xs px-3 py-2 bg-[var(--background)] text-[var(--foreground)] rounded-md hover:bg-[var(--background)]/80 disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-color)] transition-colors hover:cursor-pointer"
                 >
                   <FaSync className={`mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                  {messages.repoPage?.refreshWiki || 'Refresh Wiki'}
+                  {'刷新Wiki' || 'Refresh Wiki'}
                 </button>
               </div>
 
@@ -2102,7 +2090,7 @@ IMPORTANT:
               {Object.keys(generatedPages).length > 0 && (
                 <div className="mb-5">
                   <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3 font-serif">
-                    {messages.repoPage?.exportWiki || 'Export Wiki'}
+                    {'导出Wiki' || 'Export Wiki'}
                   </h4>
                   <div className="flex flex-col gap-2">
                     <button
@@ -2111,7 +2099,7 @@ IMPORTANT:
                       className="btn-japanese flex items-center text-xs px-3 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <FaDownload className="mr-2" />
-                      {messages.repoPage?.exportAsMarkdown || 'Export as Markdown'}
+                      {'导出为Markdown' || 'Export as Markdown'}
                     </button>
                     <button
                       onClick={() => exportWiki('json')}
@@ -2119,7 +2107,7 @@ IMPORTANT:
                       className="flex items-center text-xs px-3 py-2 bg-[var(--background)] text-[var(--foreground)] rounded-md hover:bg-[var(--background)]/80 disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-color)] transition-colors"
                     >
                       <FaFileExport className="mr-2" />
-                      {messages.repoPage?.exportAsJson || 'Export as JSON'}
+                      {'导出为JSON' || 'Export as JSON'}
                     </button>
                   </div>
                   {exportError && (
@@ -2131,13 +2119,13 @@ IMPORTANT:
               )}
 
               <h4 className="text-md font-semibold text-[var(--foreground)] mb-3 font-serif">
-                {messages.repoPage?.pages || 'Pages'}
+                {'页面' || 'Pages'}
               </h4>
               <WikiTreeView
                 wikiStructure={wikiStructure}
                 currentPageId={currentPageId}
                 onPageSelect={handlePageSelect}
-                messages={messages.repoPage}
+                messages={null}
               />
             </div>
 
@@ -2149,8 +2137,6 @@ IMPORTANT:
                     {generatedPages[currentPageId].title}
                   </h3>
 
-
-
                   <div className="prose prose-sm md:prose-base lg:prose-lg max-w-none">
                     <Markdown
                       content={generatedPages[currentPageId].content}
@@ -2160,7 +2146,7 @@ IMPORTANT:
                   {generatedPages[currentPageId].relatedPages.length > 0 && (
                     <div className="mt-8 pt-4 border-t border-[var(--border-color)]">
                       <h4 className="text-sm font-semibold text-[var(--muted)] mb-3">
-                        {messages.repoPage?.relatedPages || 'Related Pages:'}
+                        {'相关页面：' || 'Related Pages:'}
                       </h4>
                       <div className="flex flex-wrap gap-2">
                         {generatedPages[currentPageId].relatedPages.map(relatedId => {
@@ -2186,7 +2172,7 @@ IMPORTANT:
                     <FaBookOpen className="text-4xl relative z-10" />
                   </div>
                   <p className="font-serif">
-                    {messages.repoPage?.selectPagePrompt || 'Select a page from the navigation to view its content'}
+                    {'从导航中选择一个页面以查看其内容' || 'Select a page from the navigation to view its content'}
                   </p>
                 </div>
               )}
@@ -2198,7 +2184,7 @@ IMPORTANT:
       <footer className="max-w-[90%] xl:max-w-[1400px] mx-auto mt-8 flex flex-col gap-4 w-full">
         <div className="flex justify-between items-center gap-4 text-center text-[var(--muted)] text-sm h-fit w-full bg-[var(--card-bg)] rounded-lg p-3 shadow-sm border border-[var(--border-color)]">
           <p className="flex-1 font-serif">
-            {messages.footer?.copyright || 'DeepWiki - Generate Wiki from GitHub/Gitlab/Bitbucket repositories'}
+            {'DeepWiki - 为代码仓库提供AI驱动的文档' || 'DeepWiki - Generate Wiki from GitHub/Gitlab/Bitbucket repositories'}
           </p>
           <ThemeToggle />
         </div>
@@ -2209,7 +2195,7 @@ IMPORTANT:
         <button
           onClick={() => setIsAskModalOpen(true)}
           className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[var(--accent-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--accent-primary)]/90 transition-all z-50"
-          aria-label={messages.ask?.title || 'Ask about this repository'}
+          aria-label={'Ask about this repository'}
         >
           <FaComments className="text-xl" />
         </button>
