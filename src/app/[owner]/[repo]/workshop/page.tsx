@@ -9,6 +9,9 @@ import Markdown from '@/components/Markdown';
 import { RepoInfo } from '@/types/repoinfo';
 import getRepoUrl from '@/utils/getRepoUrl';
 
+const FIXED_MODEL_PROVIDER = 'direct';
+const FIXED_MODEL_NAME = 'deepseek-v4-flash';
+
 // Helper function to add tokens and other parameters to request body
 const addTokensToRequestBody = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,12 +28,9 @@ const addTokensToRequestBody = (
     requestBody.token = token;
   }
 
-  // Add provider-based model selection parameters
-  requestBody.provider = provider;
-  requestBody.model = model;
-  if (isCustomModel && customModel) {
-    requestBody.custom_model = customModel;
-  }
+  // Add fixed model parameters
+  requestBody.provider = FIXED_MODEL_PROVIDER;
+  requestBody.model = FIXED_MODEL_NAME;
 
   requestBody.language = language;
 };
@@ -49,10 +49,6 @@ export default function WorkshopPage() {
   const repoType = searchParams.get('type') || 'github';
   const localPath = searchParams.get('local_path') ? decodeURIComponent(searchParams.get('local_path') || '') : undefined;
   const repoUrl = searchParams.get('repo_url') ? decodeURIComponent(searchParams.get('repo_url') || '') : undefined;
-  const providerParam = searchParams.get('provider') || '';
-  const modelParam = searchParams.get('model') || '';
-  const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
-  const customModelParam = searchParams.get('custom_model') || '';
   const language = searchParams.get('language') || 'en';
 
   // Import language context for translations  // Initialize repo info with useMemo to prevent unnecessary re-renders
@@ -306,7 +302,7 @@ Make the workshop content in ${language === 'en' ? 'English' :
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language);
+      addTokensToRequestBody(requestBody, token, repoInfo.type, FIXED_MODEL_PROVIDER, FIXED_MODEL_NAME, false, '', language);
 
       // Use WebSocket for communication
       let content = '';
@@ -514,7 +510,7 @@ Estimated time: 20-30 minutes | Combines concepts from all exercises
       setIsLoading(false);
       setLoadingMessage(undefined);
     }
-  }, [owner, repo, repoInfo, token, providerParam, modelParam, isCustomModelParam, customModelParam, language, isLoading, cachedWikiContent, fetchCachedWikiContent]);
+  }, [owner, repo, repoInfo, token, language, isLoading, cachedWikiContent, fetchCachedWikiContent]);
 
   // Export workshop content
   const exportWorkshop = useCallback(async () => {

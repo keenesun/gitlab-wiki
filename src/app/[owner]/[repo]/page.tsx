@@ -86,6 +86,25 @@ const wikiStyles = `
   }
 `;
 
+const FIXED_MODEL_PROVIDER = 'direct';
+const FIXED_MODEL_NAME = 'deepseek-v4-flash';
+const WIKI_STRUCTURE_TIMEOUT_MS = 15 * 60 * 1000;
+const UNGROUNDED_WIKI_CONTENT_PATTERNS = [
+  /由于未提供任何\s*\[RELEVANT_SOURCE_FILES\]/i,
+  /未提供任何代码源文件/i,
+  /无法生成此页面/i,
+  /no relevant source files/i,
+  /no source files (?:were )?provided/i,
+  /unable to generate this page/i,
+  /^Error generating content:/i,
+  /^Error:\s*Repository source context is unavailable/i,
+];
+
+const isUngroundedWikiContent = (content: string): boolean => {
+  const normalized = content.trim();
+  return !normalized || UNGROUNDED_WIKI_CONTENT_PATTERNS.some(pattern => pattern.test(normalized));
+};
+
 // Helper function to generate cache key for localStorage
 const getCacheKey = (owner: string, repo: string, repoType: string, language: string, isComprehensive: boolean = true): string => {
   return `deepwiki_cache_${repoType}_${owner}_${repo}_${language}_${isComprehensive ? 'comprehensive' : 'concise'}`;
@@ -111,12 +130,9 @@ const addTokensToRequestBody = (
     requestBody.token = token;
   }
 
-  // Add provider-based model selection parameters
-  requestBody.provider = provider;
-  requestBody.model = model;
-  if (isCustomModel && customModel) {
-    requestBody.custom_model = customModel;
-  }
+  // Add fixed model parameters
+  requestBody.provider = FIXED_MODEL_PROVIDER;
+  requestBody.model = FIXED_MODEL_NAME;
 
   requestBody.language = language;
 
@@ -185,10 +201,6 @@ export default function RepoWikiPage() {
   const token = searchParams.get('token') || '';
   const localPath = searchParams.get('local_path') ? decodeURIComponent(searchParams.get('local_path') || '') : undefined;
   const repoUrl = searchParams.get('repo_url') ? decodeURIComponent(searchParams.get('repo_url') || '') : undefined;
-  const providerParam = searchParams.get('provider') || '';
-  const modelParam = searchParams.get('model') || '';
-  const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
-  const customModelParam = searchParams.get('custom_model') || '';
   const language = searchParams.get('language') || 'en';
   const repoHost = (() => {
     if (!repoUrl) return '';
@@ -235,12 +247,6 @@ export default function RepoWikiPage() {
   const [effectiveRepoInfo, setEffectiveRepoInfo] = useState(repoInfo); // Track effective repo info with cached data
   const [embeddingError, setEmbeddingError] = useState(false);
 
-  // Model selection state variables
-  const [selectedProviderState, setSelectedProviderState] = useState(providerParam);
-  const [selectedModelState, setSelectedModelState] = useState(modelParam);
-  const [isCustomSelectedModelState, setIsCustomSelectedModelState] = useState(isCustomModelParam);
-  const [customSelectedModelState, setCustomSelectedModelState] = useState(customModelParam);
-  const [showModelOptions, setShowModelOptions] = useState(false); // Controls whether to show model options
   const excludedDirs = searchParams.get('excluded_dirs') || '';
   const excludedFiles = searchParams.get('excluded_files') || '';
   const [modelExcludedDirs, setModelExcludedDirs] = useState(excludedDirs);
@@ -409,6 +415,10 @@ export default function RepoWikiPage() {
         // Get repository URL
         const repoUrl = getRepoUrl(effectiveRepoInfo);
 
+        const sourceFileHints = filePaths.length > 0
+          ? filePaths.map(path => `- [${path}](${generateFileUrl(path)})`).join('\n')
+          : '- Select the relevant files from the retrieved repository context.';
+
         // Create the prompt content - simplified to avoid message dialogs
  const promptContent =
 `You are an expert technical writer and software architect.
@@ -416,10 +426,13 @@ Your task is to generate a comprehensive and accurate technical wiki page in Mar
 
 You will be given:
 1. The "[WIKI_PAGE_TOPIC]" for the page you need to create.
-2. A list of "[RELEVANT_SOURCE_FILES]" from the project that you MUST use as the sole basis for the content. You have access to the full content of these files. You MUST use AT LEAST 5 relevant source files for comprehensive coverage - if fewer are provided, search for additional related files in the codebase.
+2. Optional "[RELEVANT_SOURCE_FILES]" hints from the Wiki structure.
+3. Retrieved repository source context injected separately by the backend. This retrieved context is authoritative and is the sole basis for the page.
+
+Use only files that actually appear in the retrieved repository context. If the hints are empty or incomplete, select relevant files from that context. Never claim that source files were not provided when retrieved context is present.
 
 CRITICAL STARTING INSTRUCTION:
-The very first thing on the page MUST be a \`<details>\` block listing ALL the \`[RELEVANT_SOURCE_FILES]\` you used to generate the content. There MUST be AT LEAST 5 source files listed - if fewer were provided, you MUST find additional related files to include.
+The very first thing on the page MUST be a \`<details>\` block listing every actual repository file used to generate the content. Use as many files as the topic genuinely requires; do not invent files merely to reach a fixed count.
 Format it exactly like this:
 <details>
 <summary>Relevant source files</summary>
@@ -427,13 +440,12 @@ Format it exactly like this:
 Remember, do not provide any acknowledgements, disclaimers, apologies, or any other preface before the \`<details>\` block. JUST START with the \`<details>\` block.
 The following files were used as context for generating this wiki page:
 
-${filePaths.map(path => `- [${path}](${generateFileUrl(path)})`).join('\n')}
-<!-- Add additional relevant files if fewer than 5 were provided -->
+${sourceFileHints}
 </details>
 
 Immediately after the \`<details>\` block, the main title of the page should be a H1 Markdown heading: \`# ${page.title}\`.
 
-Based ONLY on the content of the \`[RELEVANT_SOURCE_FILES]\`:
+Based ONLY on the retrieved repository source context:
 
 1.  **Introduction:** Start with a concise introduction (1-2 paragraphs) explaining the purpose, scope, and high-level overview of "${page.title}" within the context of the overall project. If relevant, and if information is available in the provided files, link to other potential wiki pages using the format \`[Link Text](#page-anchor-or-id)\`.
 
@@ -464,7 +476,7 @@ Based ONLY on the content of the \`[RELEVANT_SOURCE_FILES]\`:
            - -) solid line with open arrow (async message, fire-and-forget)
            - --) dotted line with open arrow (async response)
            - Examples: A->>B: Request, B-->>A: Response, A->xB: Error, A-)B: Async event
-         - Use +/- suffix for activation boxes: A->>+B: Start (activates B), B-->>-A: End (deactivates B)
+         - Do NOT use +/- activation suffixes on sequence arrows; use plain arrows only, because generated activation pairs are easy to unbalance
          - Group related participants using "box": box GroupName ... end
          - Use structural elements for complex flows:
            - loop LoopText ... end (for iterations)
@@ -493,7 +505,7 @@ Based ONLY on the content of the \`[RELEVANT_SOURCE_FILES]\`:
     *   Place citations at the end of the paragraph, under the diagram/table, or after the code snippet.
     *   Use the exact format: \`Sources: [filename.ext:start_line-end_line]()\` for a range, or \`Sources: [filename.ext:line_number]()\` for a single line. Multiple files can be cited: \`Sources: [file1.ext:1-10](), [file2.ext:5](), [dir/file3.ext]()\` (if the whole file is relevant and line numbers are not applicable or too broad).
     *   If an entire section is overwhelmingly based on one or two files, you can cite them under the section heading in addition to more specific citations within the section.
-    *   IMPORTANT: You MUST cite AT LEAST 5 different source files throughout the wiki page to ensure comprehensive coverage.
+    *   Cite every repository file that materially supports the page. The number of distinct files should follow the available evidence and topic scope rather than an arbitrary minimum.
 
 7.  **Technical Accuracy:** All information must be derived SOLELY from the \`[RELEVANT_SOURCE_FILES]\`. Do not infer, invent, or use external knowledge about similar systems or common practices unless it's directly supported by the provided code. If information is not present in the provided files, do not include it or explicitly state its absence if crucial to the topic.
 
@@ -524,6 +536,8 @@ Remember:
         const requestBody: Record<string, any> = {
           repo_url: repoUrl,
           type: effectiveRepoInfo.type,
+          require_rag_context: true,
+          rag_query: [page.title, ...filePaths].join(' '),
           messages: [{
             role: 'user',
             content: promptContent
@@ -531,7 +545,7 @@ Remember:
         };
 
         // Add tokens if available
-        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
+        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, FIXED_MODEL_PROVIDER, FIXED_MODEL_NAME, false, '', language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
 
         // Use WebSocket for communication
         let content = '';
@@ -638,6 +652,14 @@ Remember:
         // Clean up markdown delimiters
         content = content.replace(/^```markdown\s*/i, '').replace(/```\s*$/i, '');
 
+        const normalizedContent = content.trim();
+        if (/^Error(?:\s|:)/i.test(normalizedContent)) {
+          throw new Error(normalizedContent.replace(/^Error:\s*/i, '') || 'Wiki page generation failed');
+        }
+        if (isUngroundedWikiContent(normalizedContent)) {
+          throw new Error('Repository source context was not used; the generated page was rejected.');
+        }
+
         console.log(`Received content for ${page.title}, length: ${content.length} characters`);
 
         // Store the FINAL generated content
@@ -672,7 +694,7 @@ Remember:
         setLoadingMessage(undefined); // Clear specific loading message
       }
     });
-  }, [generatedPages, currentToken, effectiveRepoInfo, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, activeContentRequests, generateFileUrl]);
+  }, [generatedPages, currentToken, effectiveRepoInfo, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, language, activeContentRequests, generateFileUrl]);
 
   // Determine the wiki structure from repository data
   const determineWikiStructure = useCallback(async (fileTree: string, readme: string, owner: string, repo: string) => {
@@ -691,7 +713,7 @@ Remember:
 
     try {
       setStructureRequestInProgress(true);
-      setLoadingMessage('验证Wiki结构...' || 'Determining wiki structure...');
+      setLoadingMessage('正在准备索引并生成 Wiki 结构，首次处理可能需要几分钟...');
 
       // Get repository URL
       const repoUrl = getRepoUrl(effectiveRepoInfo);
@@ -828,79 +850,80 @@ IMPORTANT:
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
+      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, FIXED_MODEL_PROVIDER, FIXED_MODEL_NAME, false, '', language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
 
       // Use WebSocket for communication
       let responseText = '';
 
+      let webSocketConnected = false;
+
       try {
-        // Create WebSocket URL from the server base URL
         const serverBaseUrl = process.env.SERVER_BASE_URL || 'http://localhost:8001';
         const wsBaseUrl = serverBaseUrl.replace(/^http/, 'ws')? serverBaseUrl.replace(/^https/, 'wss'): serverBaseUrl.replace(/^http/, 'ws');
         const wsUrl = `${wsBaseUrl}/ws/chat`;
-
-        // Create a new WebSocket connection
         const ws = new WebSocket(wsUrl);
 
-        // Create a promise that resolves when the WebSocket connection is complete
         await new Promise<void>((resolve, reject) => {
-          // Set up event handlers
-          ws.onopen = () => {
-            console.log('WebSocket connection established for wiki structure');
-            // Send the request as JSON
-            ws.send(JSON.stringify(requestBody));
-            resolve();
-          };
-
-          ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            reject(new Error('WebSocket connection failed'));
-          };
-
-          // If the connection doesn't open within 5 seconds, fall back to HTTP
           const timeout = setTimeout(() => {
+            ws.close();
             reject(new Error('WebSocket connection timeout'));
           }, 5000);
 
-          // Clear the timeout if the connection opens successfully
           ws.onopen = () => {
             clearTimeout(timeout);
+            webSocketConnected = true;
             console.log('WebSocket connection established for wiki structure');
-            // Send the request as JSON
             ws.send(JSON.stringify(requestBody));
             resolve();
           };
+
+          ws.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('WebSocket connection failed'));
+          };
         });
 
-        // Create a promise that resolves when the WebSocket response is complete
         await new Promise<void>((resolve, reject) => {
-          // Handle incoming messages
+          let settled = false;
+          const finish = (action: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            action();
+          };
+          const timeout = setTimeout(() => {
+            ws.close();
+            finish(() => reject(new Error('Wiki structure generation timed out')));
+          }, WIKI_STRUCTURE_TIMEOUT_MS);
+
           ws.onmessage = (event) => {
             responseText += event.data;
           };
 
-          // Handle WebSocket close
           ws.onclose = () => {
             console.log('WebSocket connection closed for wiki structure');
-            resolve();
+            finish(resolve);
           };
 
-          // Handle WebSocket errors
-          ws.onerror = (error) => {
-            console.error('WebSocket error during message reception:', error);
-            reject(new Error('WebSocket error during message reception'));
+          ws.onerror = () => {
+            finish(() => reject(new Error('WebSocket error during wiki structure generation')));
           };
         });
       } catch (wsError) {
-        console.error('WebSocket error, falling back to HTTP:', wsError);
+        if (webSocketConnected) {
+          throw wsError;
+        }
 
-        // Fall back to HTTP if WebSocket fails
+        console.error('WebSocket connection failed, falling back to HTTP:', wsError);
+
+        // Fall back to HTTP if WebSocket never connected
         const response = await fetch(`/api/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(WIKI_STRUCTURE_TIMEOUT_MS)
         });
 
         if (!response.ok) {
@@ -933,13 +956,19 @@ IMPORTANT:
          throw new Error('The specified Ollama embedding model was not found. Please ensure the model is installed locally or select a different embedding model in the configuration.');
        }
 
+      const normalizedResponseText = responseText.trim();
+      if (/^Error(?:\s|:)/i.test(normalizedResponseText) || normalizedResponseText.includes('\nError with direct API:')) {
+        throw new Error(normalizedResponseText.replace(/^Error:\s*/i, '') || 'Model API returned an error');
+      }
+
         // Clean up markdown delimiters
       responseText = responseText.replace(/^```(?:xml)?\s*/i, '').replace(/```\s*$/i, '');
 
       // Extract wiki structure from response
-      const xmlMatch = responseText.match(/<wiki_structure>[\s\S]*?<\/wiki_structure>/m);
+      const xmlMatch = responseText.match(/<wiki_structure(?:\s[^>]*)?>[\s\S]*?<\/wiki_structure>/mi);
       if (!xmlMatch) {
-        throw new Error('No valid XML found in response');
+        const preview = normalizedResponseText.slice(0, 300);
+        throw new Error(preview ? `No valid XML found in response. Response preview: ${preview}` : 'No valid XML found in response');
       }
 
       let xmlText = xmlMatch[0];
@@ -965,6 +994,9 @@ IMPORTANT:
       let title = '';
       let description = '';
       let pages: WikiPage[] = [];
+      const availableFilePaths = new Set(
+        fileTree.split('\n').map(path => path.trim()).filter(Boolean)
+      );
 
       // Try using DOM parsing first
       const titleEl = xmlDoc.querySelector('title');
@@ -995,7 +1027,15 @@ IMPORTANT:
 
         const filePaths: string[] = [];
         filePathEls.forEach(el => {
-          if (el.textContent) filePaths.push(el.textContent);
+          const filePath = el.textContent?.trim();
+          if (!filePath) return;
+          if (!availableFilePaths.has(filePath)) {
+            console.warn(`Ignoring Wiki structure file path that does not exist in the repository: ${filePath}`);
+            return;
+          }
+          if (!filePaths.includes(filePath)) {
+            filePaths.push(filePath);
+          }
         });
 
         const relatedPages: string[] = [];
@@ -1155,7 +1195,7 @@ IMPORTANT:
     } finally {
       setStructureRequestInProgress(false);
     }
-  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, isComprehensiveView]);
+  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, language, isComprehensiveView]);
 
   // Fetch repository structure using GitHub or GitLab API
   const fetchRepositoryStructure = useCallback(async () => {
@@ -1311,10 +1351,20 @@ IMPORTANT:
         }
       }
       else if (effectiveRepoInfo.type === 'gitlab') {
-        // GitLab API approach
+        // GitLab API approach — use proxy to avoid CORS
         const projectPath = extractUrlPath(effectiveRepoInfo.repoUrl ?? '')?.replace(/\.git$/, '') || `${owner}/${repo}`;
-        const projectDomain = extractUrlDomain(effectiveRepoInfo.repoUrl ?? "https://gitlab.com");
         const encodedProjectPath = encodeURIComponent(projectPath);
+
+        // Extract GitLab host from repoUrl for proxy target
+        let gitlabHost = 'gitlab.com';
+        try {
+          const repoUrl = effectiveRepoInfo.repoUrl ?? '';
+          if (repoUrl.startsWith('http')) {
+            gitlabHost = new URL(repoUrl).host;
+          } else if (repoUrl.includes('@') && repoUrl.includes(':')) {
+            gitlabHost = repoUrl.split('@')[1]?.split(':')[0] || 'gitlab.com';
+          }
+        } catch { /* use default */ }
 
         const headers = createGitlabHeaders(currentToken);
 
@@ -1323,33 +1373,33 @@ IMPORTANT:
 
         try {
           // Step 1: Get project info to determine default branch
-          let projectInfoUrl: string;
-          let defaultBranchLocal = 'main'; // fallback
+          let defaultBranchLocal = 'main';
           try {
-            const validatedUrl = new URL(projectDomain ?? ''); // Validate domain
-            projectInfoUrl = `${validatedUrl.origin}/api/v4/projects/${encodedProjectPath}`;
+            const projectInfoRes = await fetch(
+              `/api/gitlab-proxy/projects/${encodedProjectPath}?target=${gitlabHost}`,
+              { headers }
+            );
+
+            if (!projectInfoRes.ok) {
+              const errorData = await projectInfoRes.text();
+              throw new Error(`GitLab project info error: Status ${projectInfoRes.status}, Response: ${errorData}`);
+            }
+
+            const projectInfo = await projectInfoRes.json();
+            defaultBranchLocal = projectInfo.default_branch || 'main';
+            console.log(`Found GitLab default branch: ${defaultBranchLocal}`);
+            setDefaultBranch(defaultBranchLocal);
           } catch (err) {
-            throw new Error(`Invalid project domain URL: ${projectDomain}`);
+            console.error('Failed to get GitLab project info:', err);
           }
-          const projectInfoRes = await fetch(projectInfoUrl, { headers });
-
-          if (!projectInfoRes.ok) {
-            const errorData = await projectInfoRes.text();
-            throw new Error(`GitLab project info error: Status ${projectInfoRes.status}, Response: ${errorData}`);
-          }
-
-          const projectInfo = await projectInfoRes.json();
-          defaultBranchLocal = projectInfo.default_branch || 'main';
-          console.log(`Found GitLab default branch: ${defaultBranchLocal}`);
-          // Store the default branch in state
-          setDefaultBranch(defaultBranchLocal);
 
           // Step 2: Paginate to fetch full file tree
           let page = 1;
           let morePages = true;
+          const baseUrl = `/api/gitlab-proxy/projects/${encodedProjectPath}`;
           
           while (morePages) {
-            const apiUrl = `${projectInfoUrl}/repository/tree?recursive=true&per_page=100&page=${page}`;
+            const apiUrl = `${baseUrl}/repository/tree?target=${gitlabHost}&recursive=true&per_page=100&page=${page}`;
             const response = await fetch(apiUrl, { headers });
 
             if (!response.ok) {
@@ -1376,7 +1426,7 @@ IMPORTANT:
           .join('\n');
 
           // Step 4: Try to fetch README.md content
-          const readmeUrl = `${projectInfoUrl}/repository/files/README.md/raw`;
+          const readmeUrl = `${baseUrl}/repository/files/README.md/raw?ref=main&target=${gitlabHost}`;
             try {
             const readmeResponse = await fetch(readmeUrl, { headers });
               if (readmeResponse.ok) {
@@ -1567,7 +1617,6 @@ IMPORTANT:
   // No longer needed as we use the modal directly
 
   const confirmRefresh = useCallback(async (newToken?: string) => {
-    setShowModelOptions(false);
     setLoadingMessage('清除服务器缓存...' || 'Clearing server cache...');
     setIsLoading(true); // Show loading indicator immediately
 
@@ -1577,10 +1626,10 @@ IMPORTANT:
         repo: effectiveRepoInfo.repo,
         repo_type: effectiveRepoInfo.type,
         language: language,
-        provider: selectedProviderState,
-        model: selectedModelState,
-        is_custom_model: isCustomSelectedModelState.toString(),
-        custom_model: customSelectedModelState,
+        provider: FIXED_MODEL_PROVIDER,
+        model: FIXED_MODEL_NAME,
+        is_custom_model: 'false',
+        custom_model: '',
         comprehensive: isComprehensiveView.toString(),
         authorization_code: authCode,
       });
@@ -1678,7 +1727,7 @@ IMPORTANT:
     // For now, we rely on the standard loadData flow initiated by resetting effectRan and dependencies.
     // This will re-trigger the main data loading useEffect.
     // No direct call to fetchRepositoryStructure here, let the useEffect handle it based on effectRan.current = false.
-  }, [effectiveRepoInfo, language, activeContentRequests, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
+  }, [effectiveRepoInfo, language, activeContentRequests, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
 
   // Start wiki generation when component mounts
   useEffect(() => {
@@ -1700,15 +1749,19 @@ IMPORTANT:
 
           if (response.ok) {
             const cachedData = await response.json(); // Returns null if no cache
-            if (cachedData && cachedData.wiki_structure && cachedData.generated_pages && Object.keys(cachedData.generated_pages).length > 0) {
-              console.log('Using server-cached wiki data');
-              if(cachedData.model) {
-                setSelectedModelState(cachedData.model);
-              }
-              if(cachedData.provider) {
-                setSelectedProviderState(cachedData.provider);
-              }
+            const cachedPages = cachedData?.generated_pages
+              ? Object.values(cachedData.generated_pages) as WikiPage[]
+              : [];
+            const cacheHasUngroundedContent = cachedPages.some(page =>
+              isUngroundedWikiContent(page.content || '')
+            );
 
+            if (cacheHasUngroundedContent) {
+              console.warn('Ignoring cached Wiki because it contains an ungrounded or failed page.');
+            }
+
+            if (cachedData && cachedData.wiki_structure && cachedData.generated_pages && cachedPages.length > 0 && !cacheHasUngroundedContent) {
+              console.log('Using server-cached wiki data');
               // Update repoInfo
               if(cachedData.repo) {
                 setEffectiveRepoInfo(cachedData.repo);
@@ -1880,7 +1933,10 @@ IMPORTANT:
           !cacheLoadedSuccessfully.current) {
 
         const allPagesHaveContent = wikiStructure.pages.every(page =>
-          generatedPages[page.id] && generatedPages[page.id].content && generatedPages[page.id].content !== 'Loading...');
+          generatedPages[page.id] &&
+          generatedPages[page.id].content &&
+          generatedPages[page.id].content !== 'Loading...' &&
+          !isUngroundedWikiContent(generatedPages[page.id].content));
 
         if (allPagesHaveContent) {
           console.log('Attempting to save wiki data to server cache via Next.js proxy');
@@ -1898,8 +1954,8 @@ IMPORTANT:
               comprehensive: isComprehensiveView,
               wiki_structure: structureToCache,
               generated_pages: generatedPages,
-              provider: selectedProviderState,
-              model: selectedModelState
+              provider: FIXED_MODEL_PROVIDER,
+              model: FIXED_MODEL_NAME
             };
             const response = await fetch(`/api/wiki_cache`, {
               method: 'POST',
@@ -2219,10 +2275,6 @@ IMPORTANT:
           <div className="flex-1 overflow-y-auto p-4">
             <Ask
               repoInfo={effectiveRepoInfo}
-              provider={selectedProviderState}
-              model={selectedModelState}
-              isCustomModel={isCustomSelectedModelState}
-              customModel={customSelectedModelState}
               language={language}
               onRef={(ref) => (askComponentRef.current = ref)}
             />
@@ -2233,14 +2285,14 @@ IMPORTANT:
       <ModelSelectionModal
         isOpen={isModelSelectionModalOpen}
         onClose={() => setIsModelSelectionModalOpen(false)}
-        provider={selectedProviderState}
-        setProvider={setSelectedProviderState}
-        model={selectedModelState}
-        setModel={setSelectedModelState}
-        isCustomModel={isCustomSelectedModelState}
-        setIsCustomModel={setIsCustomSelectedModelState}
-        customModel={customSelectedModelState}
-        setCustomModel={setCustomSelectedModelState}
+        provider={FIXED_MODEL_PROVIDER}
+        setProvider={() => {}}
+        model={FIXED_MODEL_NAME}
+        setModel={() => {}}
+        isCustomModel={false}
+        setIsCustomModel={() => {}}
+        customModel=""
+        setCustomModel={() => {}}
         isComprehensiveView={isComprehensiveView}
         setIsComprehensiveView={setIsComprehensiveView}
         showFileFilters={true}
@@ -2254,6 +2306,7 @@ IMPORTANT:
         setIncludedFiles={setModelIncludedFiles}
         onApply={confirmRefresh}
         showWikiType={true}
+        showModelSelector={false}
         showTokenInput={effectiveRepoInfo.type !== 'local' && !currentToken} // Show token input if not local and no current token
         repositoryType={effectiveRepoInfo.type as 'github' | 'gitlab' | 'bitbucket'}
         authRequired={authRequired}

@@ -178,29 +178,22 @@ async def get_model_config():
     try:
         logger.info("Fetching model configurations")
 
-        # Create providers from the config file
         providers = []
-        default_provider = configs.get("default_provider", "google")
+        default_provider = "direct"
 
-        # Add provider configuration based on config.py
-        for provider_id, provider_config in configs["providers"].items():
-            models = []
-            # Add models from config
-            for model_id in provider_config["models"].keys():
-                # Get a more user-friendly display name if possible
-                models.append(Model(id=model_id, name=model_id))
+        deepseek_config = configs.get("providers", {}).get("direct", {})
+        deepseek_model = deepseek_config.get("default_model", "deepseek-v4-flash")
 
-            # Add provider with its models
-            providers.append(
-                Provider(
-                    id=provider_id,
-                    name=f"{provider_id.capitalize()}",
-                    supportsCustomModel=provider_config.get("supportsCustomModel", False),
-                    models=models
-                )
+        providers.append(
+            Provider(
+                id="direct",
+                name="DeepSeek",
+                supportsCustomModel=False,
+                models=[Model(id=deepseek_model, name="DeepSeek Chat")]
             )
+        )
 
-        # Create and return the full configuration
+        # Create and return the fixed configuration
         config = ModelConfig(
             providers=providers,
             defaultProvider=default_provider

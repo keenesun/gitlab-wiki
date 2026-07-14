@@ -63,6 +63,14 @@ class ChatCompletionRequest(BaseModel):
     excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
+    require_rag_context: bool = Field(
+        False,
+        description="Fail the request instead of calling the model when repository context is unavailable",
+    )
+    rag_query: Optional[str] = Field(
+        None,
+        description="Optional concise query used only for repository retrieval",
+    )
 
 async def handle_websocket_chat(websocket: WebSocket):
     """
@@ -193,58 +201,60 @@ async def handle_websocket_chat(websocket: WebSocket):
         # Get the query from the last message
         query = last_message.content
 
-        # Only retrieve documents if input is not too large
+        # Retrieve repository context when the request can fit it.
         context_text = ""
         retrieved_documents = None
 
         if not input_too_large:
             try:
-                # If filePath exists, modify the query for RAG to focus on the file
-                rag_query = query
+                rag_query = (request.rag_query or "").strip() or query
                 if request.filePath:
-                    # Use the file path to get relevant context about the file
                     rag_query = f"Contexts related to {request.filePath}"
                     logger.info(f"Modified RAG query to focus on file: {request.filePath}")
 
-                # Try to perform RAG retrieval
-                try:
-                    # This will use the actual RAG implementation
-                    retrieved_documents = request_rag(rag_query, language=request.language)
+                retrieved_documents = request_rag.call(rag_query, language=request.language)
+                documents = (
+                    retrieved_documents[0].documents
+                    if retrieved_documents and getattr(retrieved_documents[0], "documents", None)
+                    else []
+                )
 
-                    if retrieved_documents and retrieved_documents[0].documents:
-                        # Format context for the prompt in a more structured way
-                        documents = retrieved_documents[0].documents
-                        logger.info(f"Retrieved {len(documents)} documents")
+                if documents:
+                    logger.info(f"Retrieved {len(documents)} documents")
+                    docs_by_file = {}
+                    for doc in documents:
+                        file_path = doc.meta_data.get('file_path', 'unknown')
+                        if file_path not in docs_by_file:
+                            docs_by_file[file_path] = []
+                        docs_by_file[file_path].append(doc)
 
-                        # Group documents by file path
-                        docs_by_file = {}
-                        for doc in documents:
-                            file_path = doc.meta_data.get('file_path', 'unknown')
-                            if file_path not in docs_by_file:
-                                docs_by_file[file_path] = []
-                            docs_by_file[file_path].append(doc)
+                    context_parts = []
+                    for file_path, docs in docs_by_file.items():
+                        header = f"## File Path: {file_path}\n\n"
+                        content = "\n\n".join([doc.text for doc in docs])
+                        context_parts.append(f"{header}{content}")
 
-                        # Format context text with file path grouping
-                        context_parts = []
-                        for file_path, docs in docs_by_file.items():
-                            # Add file header with metadata
-                            header = f"## File Path: {file_path}\n\n"
-                            # Add document content
-                            content = "\n\n".join([doc.text for doc in docs])
-
-                            context_parts.append(f"{header}{content}")
-
-                        # Join all parts with clear separation
-                        context_text = "\n\n" + "-" * 10 + "\n\n".join(context_parts)
-                    else:
-                        logger.warning("No documents retrieved from RAG")
-                except Exception as e:
-                    logger.error(f"Error in RAG retrieval: {str(e)}")
-                    # Continue without RAG if there's an error
-
+                    context_text = "\n\n" + "-" * 10 + "\n\n".join(context_parts)
+                else:
+                    logger.warning("No documents retrieved from RAG")
             except Exception as e:
-                logger.error(f"Error retrieving documents: {str(e)}")
-                context_text = ""
+                logger.error(f"Error in RAG retrieval: {str(e)}")
+        else:
+            logger.warning("Skipping RAG retrieval because the request input is too large")
+
+        if request.require_rag_context and not context_text.strip():
+            reason = (
+                "the page-generation request is too large for repository retrieval"
+                if input_too_large
+                else "no repository documents were retrieved"
+            )
+            logger.error(f"Required repository context is unavailable: {reason}")
+            await websocket.send_text(
+                "Error: Repository source context is unavailable. "
+                "The model was not called, so no ungrounded Wiki content was generated."
+            )
+            await websocket.close()
+            return
 
         # Get repository information
         repo_url = request.repo_url

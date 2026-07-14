@@ -28,6 +28,7 @@ interface ModelSelectorProps {
   setIsCustomModel: (value: boolean) => void;
   customModel: string;
   setCustomModel: (value: string) => void;
+  showModelControls?: boolean;
 
   // File filter configuration
   showFileFilters?: boolean;
@@ -50,6 +51,7 @@ export default function UserSelector({
   setIsCustomModel,
   customModel,
   setCustomModel,
+  showModelControls = true,
 
   // File filter configuration
   showFileFilters = false,
@@ -256,7 +258,7 @@ next.config.js
 *.pptx`;
 
   // Display loading state
-  if (isLoading) {
+  if (showModelControls && isLoading) {
     return (
       <div className="flex flex-col gap-2">
         <div className="text-sm text-[var(--muted)]">Loading model configurations...</div>
@@ -267,11 +269,13 @@ next.config.js
   return (
     <div className="flex flex-col gap-3">
       <div className="space-y-4">
-        {error && (
+        {showModelControls && error && (
           <div className="text-sm text-red-500 mb-2">{error}</div>
         )}
 
-        {/* Provider Selection */}
+        {showModelControls && (
+          <>
+            {/* Provider Selection */}
         <div>
           <label htmlFor="provider-dropdown" className="block text-xs font-medium text-[var(--foreground)] mb-1.5">
             {"模型提供商"}
@@ -366,6 +370,8 @@ next.config.js
               </label>
             </div>
           </div>
+        )}
+          </>
         )}
 
         {showFileFilters && (

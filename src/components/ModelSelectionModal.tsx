@@ -33,6 +33,7 @@ interface ModelSelectionModalProps {
   setIncludedFiles?: (value: string) => void;
   showFileFilters?: boolean;
   showWikiType: boolean;
+  showModelSelector?: boolean;
   
   // Token input for refresh
   showTokenInput?: boolean;
@@ -72,6 +73,7 @@ export default function ModelSelectionModal({
   setAuthCode,
   isAuthLoading,
   showWikiType = true,
+  showModelSelector = false,
   showTokenInput = false,
   repositoryType = 'github',
 }: ModelSelectionModalProps) {  // Local state for form values (to only apply changes when the user clicks "Submit")
@@ -138,7 +140,7 @@ export default function ModelSelectionModal({
           {/* Modal header with close button */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)]">
             <h3 className="text-lg font-medium text-[var(--accent-primary)]">
-              <span className="text-[var(--accent-primary)]">{"模型选择"}</span>
+              <span className="text-[var(--accent-primary)]">{"生成配置"}</span>
             </h3>
             <button
               type="button"
@@ -161,29 +163,55 @@ export default function ModelSelectionModal({
                 />
             }
 
-            {/* Divider */}
-            <div className="my-4 border-t border-[var(--border-color)]/30"></div>
+            {showWikiType && showModelSelector && (
+              <div className="my-4 border-t border-[var(--border-color)]/30"></div>
+            )}
 
             {/* Model Selector */}
-            <UserSelector
-              provider={localProvider}
-              setProvider={setLocalProvider}
-              model={localModel}
-              setModel={setLocalModel}
-              isCustomModel={localIsCustomModel}
-              setIsCustomModel={setLocalIsCustomModel}
-              customModel={localCustomModel}
-              setCustomModel={setLocalCustomModel}
-              showFileFilters={showFileFilters}
-              excludedDirs={localExcludedDirs}
-              setExcludedDirs={showFileFilters ? (value: string) => setLocalExcludedDirs(value) : undefined}
-              excludedFiles={localExcludedFiles}
-              setExcludedFiles={showFileFilters ? (value: string) => setLocalExcludedFiles(value) : undefined}
-              includedDirs={localIncludedDirs}
-              setIncludedDirs={showFileFilters ? (value: string) => setLocalIncludedDirs(value) : undefined}
-              includedFiles={localIncludedFiles}
-              setIncludedFiles={showFileFilters ? (value: string) => setLocalIncludedFiles(value) : undefined}
-            />
+            {showModelSelector && (
+              <UserSelector
+                provider={localProvider}
+                setProvider={setLocalProvider}
+                model={localModel}
+                setModel={setLocalModel}
+                isCustomModel={localIsCustomModel}
+                setIsCustomModel={setLocalIsCustomModel}
+                customModel={localCustomModel}
+                setCustomModel={setLocalCustomModel}
+                showFileFilters={showFileFilters}
+                excludedDirs={localExcludedDirs}
+                setExcludedDirs={showFileFilters ? (value: string) => setLocalExcludedDirs(value) : undefined}
+                excludedFiles={localExcludedFiles}
+                setExcludedFiles={showFileFilters ? (value: string) => setLocalExcludedFiles(value) : undefined}
+                includedDirs={localIncludedDirs}
+                setIncludedDirs={showFileFilters ? (value: string) => setLocalIncludedDirs(value) : undefined}
+                includedFiles={localIncludedFiles}
+                setIncludedFiles={showFileFilters ? (value: string) => setLocalIncludedFiles(value) : undefined}
+              />
+            )}
+
+            {!showModelSelector && showFileFilters && (
+              <UserSelector
+                provider="direct"
+                setProvider={() => {}}
+                model="deepseek-v4-flash"
+                setModel={() => {}}
+                isCustomModel={false}
+                setIsCustomModel={() => {}}
+                customModel=""
+                setCustomModel={() => {}}
+                showModelControls={false}
+                showFileFilters={showFileFilters}
+                excludedDirs={localExcludedDirs}
+                setExcludedDirs={(value: string) => setLocalExcludedDirs(value)}
+                excludedFiles={localExcludedFiles}
+                setExcludedFiles={(value: string) => setLocalExcludedFiles(value)}
+                includedDirs={localIncludedDirs}
+                setIncludedDirs={(value: string) => setLocalIncludedDirs(value)}
+                includedFiles={localIncludedFiles}
+                setIncludedFiles={(value: string) => setLocalIncludedFiles(value)}
+              />
+            )}
 
             {/* Token Input Section for refresh */}
             {showTokenInput && (

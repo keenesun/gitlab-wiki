@@ -42,6 +42,21 @@ def git_pull(repo_path: str) -> None:
     )
 
 
+def git_commit_exists(repo_path: str, sha: str) -> bool:
+    try:
+        subprocess.run(
+            ["git", "-C", repo_path, "cat-file", "-e", f"{sha}^{{commit}}"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=_git_env(repo_path),
+        )
+        return True
+    except Exception:
+        return False
+
+
 def git_diff_name_status(repo_path: str, from_sha: str, to_sha: str) -> List[Tuple[str, str, Optional[str]]]:
     result = subprocess.run(
         ["git", "-C", repo_path, "diff", "--name-status", f"{from_sha}..{to_sha}"],
@@ -101,7 +116,7 @@ def sync_index_state(
             file_path = metadata.get("file_path", "unknown")
             docs_by_file.setdefault(file_path, []).append(doc)
 
-        if from_sha and to_sha and from_sha != to_sha:
+        if from_sha and to_sha and from_sha != to_sha and git_commit_exists(repo_path, from_sha) and git_commit_exists(repo_path, to_sha):
             for status, old_path, new_path in git_diff_name_status(repo_path, from_sha, to_sha):
                 if status == "D":
                     chroma_store.delete_by_file(repo_id, old_path)

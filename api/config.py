@@ -4,6 +4,9 @@ import logging
 import re
 from pathlib import Path
 from typing import List, Union, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=False)
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +24,48 @@ from api.ollama_client import OllamaClient
 # (DeepSeek, Qwen, SiliconFlow, vLLM, etc.) without a LiteLLM proxy.
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL')
 LLM_API_KEY = os.environ.get('LLM_API_KEY')
-LLM_MODEL = os.environ.get('LLM_MODEL', 'deepseek-chat')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'deepseek-v4-flash')
+FIXED_LLM_PROVIDER = 'direct'
+FIXED_LLM_MODEL = LLM_MODEL
 
 # --- Plan-defined Embedding env vars (OpenAI-compatible direct path) ---
 EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL')
 EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY')
+
+SILICONFLOW_EMBEDDING_DIMENSIONS = {
+    "Qwen/Qwen3-Embedding-8B": {64, 128, 256, 512, 768, 1024, 1536, 2048, 4096},
+}
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {value}")
+    return value
+
+
+def _embedding_dimension(model: str) -> int | None:
+    raw_value = os.environ.get("EMBEDDING_DIM")
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        dimension = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"EMBEDDING_DIM must be an integer, got {raw_value!r}") from exc
+    if dimension <= 0:
+        raise ValueError(f"EMBEDDING_DIM must be positive, got {dimension}")
+
+    supported = SILICONFLOW_EMBEDDING_DIMENSIONS.get(model)
+    if supported and dimension not in supported:
+        allowed = ", ".join(str(value) for value in sorted(supported))
+        raise ValueError(
+            f"EMBEDDING_DIM={dimension} is not supported by {model}; supported values: {allowed}"
+        )
+    return dimension
 
 # --- Legacy provider API keys ---
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY') or LLM_API_KEY
@@ -160,24 +200,24 @@ def load_generator_config():
             else:
                 logger.warning(f"Unknown provider or client class: {provider_id}")
 
-    # Inject "direct" provider when LLM_BASE_URL is set (plan-defined path)
-    if LLM_BASE_URL and LLM_API_KEY:
-        if "providers" not in generator_config:
-            generator_config["providers"] = {}
-        generator_config["providers"]["direct"] = {
-            "client_class": "OpenAIClient",
-            "model_client": OpenAIClient,
-            "default_model": LLM_MODEL,
-            "models": {LLM_MODEL: {}},
-            "initialize_kwargs": {
-                "base_url": LLM_BASE_URL,
-                "api_key": LLM_API_KEY,
-            },
-        }
-        # Make "direct" the default when explicitly configured
-        if "default_provider" not in generator_config or generator_config.get("default_provider") == "google":
-            generator_config["default_provider"] = "direct"
-        logger.info(f"LLM direct provider configured: base_url={LLM_BASE_URL}, model={LLM_MODEL}")
+    if "providers" not in generator_config:
+        generator_config["providers"] = {}
+    generator_config["providers"]["direct"] = {
+        "client_class": "OpenAIClient",
+        "model_client": OpenAIClient,
+        "default_model": FIXED_LLM_MODEL,
+        "supportsCustomModel": False,
+        "models": {FIXED_LLM_MODEL: {"temperature": 0.7}},
+        "initialize_kwargs": {
+            "base_url": LLM_BASE_URL,
+            "api_key": LLM_API_KEY,
+        },
+    }
+    generator_config["default_provider"] = FIXED_LLM_PROVIDER
+    generator_config["providers"] = {
+        FIXED_LLM_PROVIDER: generator_config["providers"][FIXED_LLM_PROVIDER]
+    }
+    logger.info(f"Fixed LLM provider configured: provider={FIXED_LLM_PROVIDER}, model={FIXED_LLM_MODEL}")
 
     return generator_config
 
@@ -194,19 +234,38 @@ def load_embedder_config():
 
     # Inject direct embedder config when EMBEDDING_BASE_URL is set
     if EMBEDDING_BASE_URL:
-        embedder_model = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-m3")
+        if EMBEDDING_BASE_URL.rstrip("/").endswith("/embeddings"):
+            raise ValueError(
+                "EMBEDDING_BASE_URL must be an API root such as https://api.siliconflow.cn/v1, "
+                "not the /embeddings endpoint"
+            )
+
+        embedder_model = os.environ.get("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B")
+        embedder_dimension = _embedding_dimension(embedder_model)
         embedder_api_key = EMBEDDING_API_KEY or LLM_API_KEY
+        model_kwargs = {
+            "model": embedder_model,
+            "encoding_format": "float",
+        }
+        if embedder_dimension is not None:
+            model_kwargs["dimensions"] = embedder_dimension
+
         embedder_config["embedder_direct"] = {
             "model_client": OpenAIClient,
             "client_class": "OpenAIClient",
             "initialize_kwargs": {
-                "base_url": EMBEDDING_BASE_URL,
+                "base_url": EMBEDDING_BASE_URL.rstrip("/"),
                 "api_key": embedder_api_key,
             },
-            "model_kwargs": {"model": embedder_model},
-            "batch_size": int(os.environ.get("EMBEDDING_BATCH_SIZE", "500")),
+            "model_kwargs": model_kwargs,
+            "batch_size": _positive_int_env("EMBEDDING_BATCH_SIZE", 32),
         }
-        logger.info(f"Embedding direct config: base_url={EMBEDDING_BASE_URL}, model={embedder_model}")
+        logger.info(
+            "Embedding direct config: base_url=%s, model=%s, dimensions=%s",
+            EMBEDDING_BASE_URL,
+            embedder_model,
+            embedder_dimension or "provider-default",
+        )
 
     return embedder_config
 
@@ -293,8 +352,10 @@ def get_embedder_type():
     Get the current embedder type based on configuration.
     
     Returns:
-        str: 'bedrock', 'ollama', 'google', or 'openai' (default)
+        str: 'direct', 'bedrock', 'ollama', 'google', or 'openai' (default)
     """
+    if EMBEDDING_BASE_URL and "embedder_direct" in configs:
+        return 'direct'
     if is_bedrock_embedder():
         return 'bedrock'
     elif is_ollama_embedder():

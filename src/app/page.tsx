@@ -11,6 +11,9 @@ import ProcessedProjects from '@/components/ProcessedProjects';
 import { extractUrlPath, extractUrlDomain } from '@/utils/urlDecoder';
 import { useProcessedProjects } from '@/hooks/useProcessedProjects';
 
+const FIXED_MODEL_PROVIDER = 'direct';
+const FIXED_MODEL_NAME = 'deepseek-v4-flash';
+
 // Define the demo mermaid charts outside the component
 const DEMO_FLOW_CHART = `graph TD
   A[Code Repository] --> B[DeepWiki]
@@ -57,10 +60,10 @@ export default function Home() {
         const config = configs[repoUrl.trim()];
         if (config) {
           setIsComprehensiveView(config.isComprehensiveView === undefined ? true : config.isComprehensiveView);
-          setProvider(config.provider || '');
-          setModel(config.model || '');
-          setIsCustomModel(config.isCustomModel || false);
-          setCustomModel(config.customModel || '');
+          setProvider(FIXED_MODEL_PROVIDER);
+          setModel(FIXED_MODEL_NAME);
+          setIsCustomModel(false);
+          setCustomModel('');
           setSelectedPlatform(config.selectedPlatform || 'github');
           setExcludedDirs(config.excludedDirs || '');
           setExcludedFiles(config.excludedFiles || '');
@@ -89,9 +92,9 @@ export default function Home() {
     }
   }, []);
 
-  // Provider-based model selection state
-  const [provider, setProvider] = useState<string>('');
-  const [model, setModel] = useState<string>('');
+  // Fixed model state
+  const [provider, setProvider] = useState<string>(FIXED_MODEL_PROVIDER);
+  const [model, setModel] = useState<string>(FIXED_MODEL_NAME);
   const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
   const [customModel, setCustomModel] = useState<string>('');
 
@@ -150,6 +153,7 @@ export default function Home() {
     // Handle Windows absolute paths (e.g., C:\path\to\folder)
     const windowsPathRegex = /^[a-zA-Z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*$/;
     const customGitRegex = /^(?:https?:\/\/)?([^\/]+)\/(.+?)\/([^\/]+)(?:\.git)?\/?$/;
+    const sshGitRegex = /^(?:([\w.-]+)@([\w.-]+):(.+)|ssh:\/\/(?:([\w.-]+)@)?([^/:]+)(?::\d+)?\/(.+))(?:\.git)?\/?$/;
 
     if (windowsPathRegex.test(input)) {
       type = 'local';
@@ -184,6 +188,27 @@ export default function Home() {
         owner = parts[parts.length - 2] || '';
       }
     }
+    else if (sshGitRegex.test(input)) {
+      const sshMatch = input.match(sshGitRegex);
+      if (sshMatch) {
+        const host = sshMatch[2] || sshMatch[5] || '';
+        const path = sshMatch[3] || sshMatch[6] || '';
+
+        if (host.includes('github.com')) {
+          type = 'github';
+        } else if (host.includes('bitbucket.org') || host.includes('bitbucket.')) {
+          type = 'bitbucket';
+        } else {
+          type = 'gitlab';
+        }
+
+        const parts = path.split('/');
+        if (parts.length >= 2) {
+          repo = parts[parts.length - 1] || '';
+          owner = parts[parts.length - 2] || '';
+        }
+      }
+    }
     // Unsupported URL formats
     else {
       console.error('Unsupported URL format:', input);
@@ -216,7 +241,7 @@ export default function Home() {
     const parsedRepo = parseRepositoryInput(repositoryInput);
 
     if (!parsedRepo) {
-      setError('Invalid repository format. Use "owner/repo", GitHub/GitLab/BitBucket URL, or a local folder path like "/path/to/folder" or "C:\\path\\to\\folder".');
+      setError('仓库格式无效。支持格式: owner/repo、HTTP(S) 地址、SSH 地址(git@host:path 或 ssh://git@host/path)，或本地路径');
       return;
     }
 
@@ -273,10 +298,10 @@ export default function Home() {
         const existingConfigs = JSON.parse(localStorage.getItem(REPO_CONFIG_CACHE_KEY) || '{}');
         const configToSave = {
           isComprehensiveView,
-          provider,
-          model,
-          isCustomModel,
-          customModel,
+          provider: FIXED_MODEL_PROVIDER,
+          model: FIXED_MODEL_NAME,
+          isCustomModel: false,
+          customModel: '',
           selectedPlatform,
           excludedDirs,
           excludedFiles,
@@ -296,7 +321,7 @@ export default function Home() {
     const parsedRepo = parseRepositoryInput(repositoryInput);
 
     if (!parsedRepo) {
-      setError('Invalid repository format. Use "owner/repo", GitHub/GitLab/BitBucket URL, or a local folder path like "/path/to/folder" or "C:\\path\\to\\folder".');
+      setError('仓库格式无效。支持格式: owner/repo、HTTP(S) 地址、SSH 地址(git@host:path 或 ssh://git@host/path)，或本地路径');
       setIsSubmitting(false);
       return;
     }
@@ -316,12 +341,9 @@ export default function Home() {
     } else {
       params.append('repo_url', encodeURIComponent(repositoryInput));
     }
-    // Add model parameters
-    params.append('provider', provider);
-    params.append('model', model);
-    if (isCustomModel && customModel) {
-      params.append('custom_model', customModel);
-    }
+    // Add fixed model parameters
+    params.append('provider', FIXED_MODEL_PROVIDER);
+    params.append('model', FIXED_MODEL_NAME);
     // Add file filters configuration
     if (excludedDirs) {
       params.append('excluded_dirs', excludedDirs);
@@ -381,7 +403,7 @@ export default function Home() {
                   type="text"
                   value={repositoryInput}
                   onChange={handleRepositoryInputChange}
-                  placeholder={"所有者/仓库或GitHub/GitLab/Bitbucket URL" || "owner/repo, GitHub/GitLab/BitBucket URL, or local folder path"}
+                  placeholder={"owner/repo、HTTP(S) URL、SSH URL 或本地路径" || "owner/repo, HTTP(S) URL, SSH URL, or local folder path"}
                   className="input-japanese block w-full pl-10 pr-3 py-2.5 border-[var(--border-color)] rounded-lg bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
                 {error && (

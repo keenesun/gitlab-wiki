@@ -23,8 +23,11 @@ from api.tools.embedder import get_embedder
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Maximum token limit for OpenAI embedding models
+# Maximum token limit for embedding requests and extreme source-file guard.
 MAX_EMBEDDING_TOKENS = 8192
+MAX_EMBEDDING_CHARACTERS = int(os.environ.get("MAX_EMBEDDING_CHARACTERS", "32768"))
+MAX_EMBEDDING_BATCH_SIZE = int(os.environ.get("MAX_EMBEDDING_BATCH_SIZE", "512"))
+MAX_SOURCE_FILE_BYTES = int(os.environ.get("MAX_SOURCE_FILE_BYTES", str(10 * 1024 * 1024)))
 
 
 def _repo_id(repo_url_or_path: str) -> str:
@@ -47,6 +50,10 @@ def _embedding_fingerprint(embedder_type: str = None) -> dict:
         "index_schema_version": int(os.environ.get("INDEX_SCHEMA_VERSION", SCHEMA_VERSION)),
         "embedder_type": embedder_type,
     }
+
+def _cache_matches_fingerprint(cache: dict, fingerprint: dict) -> bool:
+    return cache.get("embedding_fingerprint") == fingerprint
+
 
 def count_tokens(text: str, embedder_type: str = None, is_ollama_embedder: bool = None) -> int:
     """
@@ -129,6 +136,7 @@ def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_
         from api.ssh_auth import is_ssh_url, prepare_ssh_for_repo
 
         clone_env = os.environ.copy()
+        clone_env["GIT_TERMINAL_PROMPT"] = "0"
         clone_url = repo_url
 
         if is_ssh_url(repo_url):
@@ -158,7 +166,7 @@ def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_
         logger.info(f"Cloning repository from {repo_url} to {local_path}")
         # We use repo_url in the log to avoid exposing the token in logs
         result = subprocess.run(
-            ["git", "clone", clone_url, local_path],
+            ["git", "-c", "credential.helper=", "clone", clone_url, local_path],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -359,6 +367,34 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
                 logger.debug(f"Ignoring {rel_path}: detected as binary")
                 continue
 
+            file_size = os.path.getsize(file_path)
+            if file_size > MAX_SOURCE_FILE_BYTES:
+                logger.warning(
+                    "Skipping extreme file %s: %s bytes exceeds MAX_SOURCE_FILE_BYTES=%s",
+                    rel_path,
+                    file_size,
+                    MAX_SOURCE_FILE_BYTES,
+                )
+                continue
+
+            # Skip vendor bundles: single long lines, webpack bundles, or unusually large files
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    first_k = f.read(8000)
+                lines = first_k.split("\n")
+                is_js = ext in (".js", ".ts", ".jsx", ".tsx")
+                # Single-line minified file
+                if is_js and len(lines) <= 2 and len(first_k.strip()) > 5000:
+                    logger.debug(f"Ignoring {rel_path}: minified (1-2 lines, {len(first_k)} chars)")
+                    continue
+                # Webpack bundle signatures
+                if is_js and len(first_k) >= 7800:
+                    if "__webpack_require__" in first_k or "__webpack_module_cache__" in first_k:
+                        logger.debug(f"Ignoring {rel_path}: webpack bundle")
+                        continue
+            except Exception:
+                pass
+
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -371,11 +407,8 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
                         and "test" not in relative_path.lower()
                     )
 
-                    # Check token count
+                    # Record the original document size; chunking is applied before embedding.
                     token_count = count_tokens(content, embedder_type)
-                    if token_count > MAX_EMBEDDING_TOKENS * 10:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
 
                     doc = Document(
                         text=content,
@@ -411,16 +444,41 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
                 logger.debug(f"Ignoring {rel_path}: detected as binary")
                 continue
 
+            file_size = os.path.getsize(file_path)
+            if file_size > MAX_SOURCE_FILE_BYTES:
+                logger.warning(
+                    "Skipping extreme file %s: %s bytes exceeds MAX_SOURCE_FILE_BYTES=%s",
+                    rel_path,
+                    file_size,
+                    MAX_SOURCE_FILE_BYTES,
+                )
+                continue
+
+            # Skip vendor bundles: single long lines, webpack bundles, or unusually large files
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    first_k = f.read(8000)
+                lines = first_k.split("\n")
+                is_js = ext in (".js", ".ts", ".jsx", ".tsx")
+                # Single-line minified file
+                if is_js and len(lines) <= 2 and len(first_k.strip()) > 5000:
+                    logger.debug(f"Ignoring {rel_path}: minified (1-2 lines, {len(first_k)} chars)")
+                    continue
+                # Webpack bundle signatures
+                if is_js and len(first_k) >= 7800:
+                    if "__webpack_require__" in first_k or "__webpack_module_cache__" in first_k:
+                        logger.debug(f"Ignoring {rel_path}: webpack bundle")
+                        continue
+            except Exception:
+                pass
+
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
                     relative_path = os.path.relpath(file_path, path)
 
-                    # Check token count
+                    # Record the original document size; chunking is applied before embedding.
                     token_count = count_tokens(content, embedder_type)
-                    if token_count > MAX_EMBEDDING_TOKENS:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
 
                     doc = Document(
                         text=content,
@@ -450,27 +508,86 @@ def _extract_embedding_vectors(result) -> List[List[float]]:
     raise ValueError("Unable to extract embeddings from embedder output")
 
 
+def _embedding_context(doc: Document, token_count: int = None) -> str:
+    metadata = getattr(doc, "meta_data", {}) or {}
+    file_path = metadata.get("file_path") or metadata.get("title") or "unknown"
+    chunk_index = metadata.get("chunk_index", "unknown")
+    tokens = token_count if token_count is not None else count_tokens(doc.text or "")
+    return (
+        f"file={file_path}, chunk={chunk_index}, chars={len(doc.text or '')}, "
+        f"estimated_tokens={tokens}"
+    )
+
+
 def embed_documents(
     documents: List[Document],
     embedder,
     embedder_type: str = "openai",
-    batch_size: int = 500,
+    batch_size: int = 32,
 ) -> List[Document]:
-    """Embed a list of chunked documents, attaching vectors in place.
+    """Embed chunked documents and attach exactly one vector to each non-empty chunk."""
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+        raise ValueError(f"Embedding batch_size must be a positive integer, got {batch_size!r}")
+    if batch_size > MAX_EMBEDDING_BATCH_SIZE:
+        raise ValueError(
+            f"Embedding batch_size={batch_size} exceeds MAX_EMBEDDING_BATCH_SIZE={MAX_EMBEDDING_BATCH_SIZE}"
+        )
 
-    For Ollama embedders, each document is embedded one at a time.
-    For other embedders, documents are processed in batches.
-    """
     if embedder_type == "ollama":
         processor = OllamaDocumentProcessor(embedder=embedder)
         return processor(documents)
 
+    model_kwargs = getattr(embedder, "model_kwargs", {}) or {}
+    model_name = model_kwargs.get("model", "unknown")
+    expected_dimension = model_kwargs.get("dimensions")
+
     for i in range(0, len(documents), batch_size):
         batch = documents[i : i + batch_size]
-        texts = [doc.text for doc in batch]
-        result = embedder(input=texts)
+        valid_pairs = []
+        for doc in batch:
+            text = (doc.text or "").strip()
+            if not text:
+                logger.warning("Skipping empty embedding chunk: %s", _embedding_context(doc, 0))
+                continue
+
+            token_count = count_tokens(text, embedder_type)
+            if len(text) > MAX_EMBEDDING_CHARACTERS or token_count > MAX_EMBEDDING_TOKENS:
+                raise ValueError(
+                    "Embedding chunk exceeds request limits "
+                    f"(model={model_name}, max_chars={MAX_EMBEDDING_CHARACTERS}, "
+                    f"max_tokens={MAX_EMBEDDING_TOKENS}, {_embedding_context(doc, token_count)})"
+                )
+            valid_pairs.append((doc, text, token_count))
+
+        if not valid_pairs:
+            continue
+
+        valid_docs = [item[0] for item in valid_pairs]
+        texts = [item[1] for item in valid_pairs]
+        contexts = [_embedding_context(item[0], item[2]) for item in valid_pairs]
+        try:
+            result = embedder(input=texts)
+        except Exception as exc:
+            raise ValueError(
+                f"Embedding request failed (model={model_name}, batch_size={len(texts)}, "
+                f"chunks=[{'; '.join(contexts)}]): {exc}"
+            ) from exc
+
         vectors = _extract_embedding_vectors(result)
-        for doc, vector in zip(batch, vectors):
+        if len(vectors) != len(valid_docs):
+            raise ValueError(
+                f"Embedding response count mismatch (model={model_name}, requested={len(valid_docs)}, "
+                f"returned={len(vectors)}, chunks=[{'; '.join(contexts)}])"
+            )
+
+        for doc, vector, context in zip(valid_docs, vectors, contexts):
+            if not vector:
+                raise ValueError(f"Embedding response contains an empty vector (model={model_name}, {context})")
+            if expected_dimension is not None and len(vector) != expected_dimension:
+                raise ValueError(
+                    f"Embedding dimension mismatch (model={model_name}, expected={expected_dimension}, "
+                    f"returned={len(vector)}, {context})"
+                )
             doc.vector = vector
 
     return documents
@@ -493,7 +610,7 @@ def transform_documents_and_save_to_db(
     Returns:
         List of Document objects with embeddings attached.
     """
-    from api.config import get_embedder_type
+    from api.config import get_embedder_config, get_embedder_type
 
     if embedder_type is None and is_ollama_embedder is not None:
         embedder_type = 'ollama' if is_ollama_embedder else None
@@ -503,7 +620,7 @@ def transform_documents_and_save_to_db(
 
     embedder = get_embedder(embedder_type=embedder_type)
 
-    embedder_config = configs.get("embedder", {})
+    embedder_config = get_embedder_config()
     batch_size = embedder_config.get("batch_size", 500)
 
     # Embed documents
@@ -511,8 +628,15 @@ def transform_documents_and_save_to_db(
 
     # Save to pickle for caching
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    cache_fingerprint = _embedding_fingerprint(embedder_type)
     with open(db_path, "wb") as f:
-        pickle.dump({"split_and_embed": embedded}, f)
+        pickle.dump(
+            {
+                "split_and_embed": embedded,
+                "embedding_fingerprint": cache_fingerprint,
+            },
+            f,
+        )
 
     return embedded
 
@@ -785,6 +909,7 @@ class DatabaseManager:
         self.db = None
         self.repo_url_or_path = None
         self.repo_paths = None
+        self.index_fingerprint = None
         self.chroma_path = os.path.join(deepwiki_root_path(), "chromadb")
 
     def prepare_database(self, repo_url_or_path: str, repo_type: str = None, access_token: str = None,
@@ -826,15 +951,23 @@ class DatabaseManager:
         self.db = None
         self.repo_url_or_path = None
         self.repo_paths = None
+        self.index_fingerprint = None
 
     def _extract_repo_name_from_url(self, repo_url_or_path: str, repo_type: str) -> str:
         # Extract owner and repo name to create unique identifier
-        url_parts = repo_url_or_path.rstrip('/').split('/')
+        from api.ssh_auth import is_ssh_url
 
-        if repo_type in ["github", "gitlab", "bitbucket"] and len(url_parts) >= 5:
-            # GitHub URL format: https://github.com/owner/repo
-            # GitLab URL format: https://gitlab.com/owner/repo or https://gitlab.com/group/subgroup/repo
-            # Bitbucket URL format: https://bitbucket.org/owner/repo
+        normalized_path = repo_url_or_path.rstrip('/')
+        if is_ssh_url(normalized_path):
+            if normalized_path.startswith("ssh://"):
+                parsed = urlparse(normalized_path)
+                normalized_path = parsed.path.lstrip('/')
+            elif ':' in normalized_path:
+                normalized_path = normalized_path.split(':', 1)[1]
+
+        url_parts = normalized_path.rstrip('/').split('/')
+
+        if len(url_parts) >= 2:
             owner = url_parts[-2]
             repo = url_parts[-1].replace(".git", "")
             repo_name = f"{owner}_{repo}"
@@ -864,7 +997,14 @@ class DatabaseManager:
 
             os.makedirs(root_path, exist_ok=True)
             # url
-            if repo_url_or_path.startswith("https://") or repo_url_or_path.startswith("http://"):
+            from api.ssh_auth import is_ssh_url
+            is_remote_repo = (
+                repo_url_or_path.startswith("https://")
+                or repo_url_or_path.startswith("http://")
+                or is_ssh_url(repo_url_or_path)
+            )
+
+            if is_remote_repo:
                 # Extract the repository name from the URL
                 repo_name = self._extract_repo_name_from_url(repo_url_or_path, repo_type)
                 logger.info(f"Extracted repo name: {repo_name}")
@@ -936,9 +1076,17 @@ class DatabaseManager:
             embedder_type = 'ollama' if is_ollama_embedder else None
         repo_id = _repo_id(self.repo_url_or_path)
         fingerprint = _embedding_fingerprint(embedder_type)
+        self.index_fingerprint = fingerprint
         root_path = deepwiki_root_path()
         meta_store = MetaStore(os.path.join(root_path, "metadata", "deepwiki.sqlite3"))
-        meta_store.assert_compatible(repo_id, fingerprint)
+        incompatible_fields = meta_store.incompatible_fields(repo_id, fingerprint)
+        cache_is_compatible = not incompatible_fields
+        if incompatible_fields:
+            logger.warning(
+                "Embedding/index fingerprint changed (%s). Rebuilding repository index...",
+                ", ".join(incompatible_fields),
+            )
+            meta_store.reset_index_state(repo_id)
         meta_store.upsert_repo(
             repo_id=repo_id,
             clone_path=self.repo_paths["save_repo_dir"],
@@ -946,12 +1094,31 @@ class DatabaseManager:
             fingerprint=fingerprint,
         )
 
+        current_documents = read_all_documents(
+            self.repo_paths["save_repo_dir"],
+            embedder_type=embedder_type,
+            excluded_dirs=excluded_dirs,
+            excluded_files=excluded_files,
+            included_dirs=included_dirs,
+            included_files=included_files,
+        )
+        current_file_paths = {
+            (getattr(doc, "meta_data", {}) or {}).get("file_path")
+            for doc in current_documents
+        }
+        current_file_paths.discard(None)
+
         # check the cache
-        if self.repo_paths and os.path.exists(self.repo_paths["save_db_file"]):
+        if cache_is_compatible and self.repo_paths and os.path.exists(self.repo_paths["save_db_file"]):
             logger.info("Loading existing database...")
             try:
                 with open(self.repo_paths["save_db_file"], "rb") as f:
                     cache = pickle.load(f)
+                if not _cache_matches_fingerprint(cache, fingerprint):
+                    logger.warning(
+                        "Existing database has no compatible embedding fingerprint. Rebuilding embeddings..."
+                    )
+                    cache = {}
                 documents = cache.get("split_and_embed", [])
                 if documents:
                     documents = enrich_transformed_documents(documents, repo_id)
@@ -967,14 +1134,27 @@ class DatabaseManager:
                         sample_sizes,
                     )
 
+                    cached_file_paths = {
+                        (getattr(doc, "meta_data", {}) or {}).get("file_path")
+                        for doc in documents
+                    }
+                    cached_file_paths.discard(None)
+                    missing_cached_files = current_file_paths - cached_file_paths
+
                     if non_empty == 0:
                         logger.warning(
                             "Existing database contains no usable embeddings. Rebuilding embeddings..."
+                        )
+                    elif missing_cached_files:
+                        logger.warning(
+                            "Existing database misses %s current files. Rebuilding embeddings...",
+                            len(missing_cached_files),
                         )
                     else:
                         chroma_store = ChromaStore(
                             os.path.join(root_path, "chromadb"),
                             self.repo_url_or_path,
+                            fingerprint=fingerprint,
                         )
                         sync_index_state(
                             meta_store,
@@ -990,14 +1170,7 @@ class DatabaseManager:
 
         # prepare the database
         logger.info("Creating new database...")
-        documents = read_all_documents(
-            self.repo_paths["save_repo_dir"],
-            embedder_type=embedder_type,
-            excluded_dirs=excluded_dirs,
-            excluded_files=excluded_files,
-            included_dirs=included_dirs,
-            included_files=included_files
-        )
+        documents = current_documents
         chunked_documents = chunk_documents(documents, repo_id)
         transformed_docs = transform_documents_and_save_to_db(
             chunked_documents,
@@ -1007,7 +1180,11 @@ class DatabaseManager:
         )
         logger.info(f"Total documents: {len(documents)}")
         transformed_docs = enrich_transformed_documents(transformed_docs, repo_id)
-        chroma_store = ChromaStore(os.path.join(root_path, "chromadb"), self.repo_url_or_path)
+        chroma_store = ChromaStore(
+            os.path.join(root_path, "chromadb"),
+            self.repo_url_or_path,
+            fingerprint=fingerprint,
+        )
         sync_index_state(
             meta_store,
             chroma_store,

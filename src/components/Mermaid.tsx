@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 // We'll use dynamic import for svg-pan-zoom
 
@@ -175,6 +175,14 @@ interface MermaidProps {
   zoomingEnabled?: boolean;
 }
 
+const normalizeMermaidChart = (chart: string): string => {
+  if (!/^\s*sequenceDiagram\b/m.test(chart)) {
+    return chart;
+  }
+
+  return chart.replace(/((?:--?>>|--?>))[+-](?=[A-Za-z0-9_])/g, '$1');
+};
+
 // Full screen modal component for the diagram
 const FullScreenModal: React.FC<{
   isOpen: boolean;
@@ -309,12 +317,13 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
   const [isFullscreen, setIsFullscreen] = useState(false);
   const mermaidRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const idRef = useRef(`mermaid-${Math.random().toString(36).substring(2, 9)}`);
-  const isDarkModeRef = useRef(
-    typeof window !== 'undefined' &&
-    window.matchMedia &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  );
+  const stableId = useId();
+  const idRef = useRef(`mermaid-${stableId.replace(/:/g, '')}`);
+  const isDarkModeRef = useRef(false);
+
+  useEffect(() => {
+    isDarkModeRef.current = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }, []);
 
   // Initialize pan-zoom functionality when SVG is rendered
   useEffect(() => {
@@ -365,8 +374,8 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
         setError(null);
         setSvg('');
 
-        // Render the chart directly without preprocessing
-        const { svg: renderedSvg } = await mermaid.render(idRef.current, chart);
+        const renderableChart = normalizeMermaidChart(chart);
+        const { svg: renderedSvg } = await mermaid.render(idRef.current, renderableChart);
 
         if (!isMounted) return;
 
@@ -376,11 +385,6 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
         }
 
         setSvg(processedSvg);
-
-        // Call mermaid.contentLoaded to ensure proper initialization
-        setTimeout(() => {
-          mermaid.contentLoaded();
-        }, 50);
       } catch (err) {
         console.error('Mermaid rendering error:', err);
 

@@ -5,20 +5,7 @@ import {FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 import Markdown from './Markdown';
 import RepoInfo from '@/types/repoinfo';
 import getRepoUrl from '@/utils/getRepoUrl';
-import ModelSelectionModal from './ModelSelectionModal';
 import { createChatWebSocket, closeWebSocket, ChatCompletionRequest } from '@/utils/websocketClient';
-
-interface Model {
-  id: string;
-  name: string;
-}
-
-interface Provider {
-  id: string;
-  name: string;
-  models: Model[];
-  supportsCustomModel?: boolean;
-}
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -32,22 +19,17 @@ interface ResearchStage {
   type: 'plan' | 'update' | 'conclusion';
 }
 
+const FIXED_MODEL_PROVIDER = 'direct';
+const FIXED_MODEL_NAME = 'deepseek-v4-flash';
+
 interface AskProps {
   repoInfo: RepoInfo;
-  provider?: string;
-  model?: string;
-  isCustomModel?: boolean;
-  customModel?: string;
   language?: string;
   onRef?: (ref: { clearConversation: () => void }) => void;
 }
 
 const Ask: React.FC<AskProps> = ({
   repoInfo,
-  provider = '',
-  model = '',
-  isCustomModel = false,
-  customModel = '',
   language = 'en',
   onRef
 }) => {
@@ -55,14 +37,6 @@ const Ask: React.FC<AskProps> = ({
   const [response, setResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
-
-  // Model selection state
-  const [selectedProvider, setSelectedProvider] = useState(provider);
-  const [selectedModel, setSelectedModel] = useState(model);
-  const [isCustomSelectedModel, setIsCustomSelectedModel] = useState(isCustomModel);
-  const [customSelectedModel, setCustomSelectedModel] = useState(customModel);
-  const [isModelSelectionModalOpen, setIsModelSelectionModalOpen] = useState(false);
-  const [isComprehensiveView, setIsComprehensiveView] = useState(true);
 
   // Get language context for translations  // Research navigation state
   const [researchStages, setResearchStages] = useState<ResearchStage[]>([]);
@@ -72,8 +46,6 @@ const Ask: React.FC<AskProps> = ({
   const [researchComplete, setResearchComplete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
-  const providerRef = useRef(provider);
-  const modelRef = useRef(model);
 
   // Focus input on component mount
   useEffect(() => {
@@ -102,47 +74,6 @@ const Ask: React.FC<AskProps> = ({
       closeWebSocket(webSocketRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    providerRef.current = provider;
-    modelRef.current = model;
-  }, [provider, model]);
-
-  useEffect(() => {
-    const fetchModel = async () => {
-      try {
-        setIsLoading(true);
-
-        const response = await fetch('/api/models/config');
-        if (!response.ok) {
-          throw new Error(`Error fetching model configurations: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        // use latest provider/model ref to check
-        if(providerRef.current == '' || modelRef.current== '') {
-          setSelectedProvider(data.defaultProvider);
-
-          // Find the default provider and set its default model
-          const selectedProvider = data.providers.find((p:Provider) => p.id === data.defaultProvider);
-          if (selectedProvider && selectedProvider.models.length > 0) {
-            setSelectedModel(selectedProvider.models[0].id);
-          }
-        } else {
-          setSelectedProvider(providerRef.current);
-          setSelectedModel(modelRef.current);
-        }
-      } catch (err) {
-        console.error('Failed to fetch model configurations:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    if(provider == '' || model == '') {
-      fetchModel()
-    }
-  }, [provider, model]);
 
   const clearConversation = () => {
     setQuestion('');
@@ -314,8 +245,8 @@ const Ask: React.FC<AskProps> = ({
         repo_url: getRepoUrl(repoInfo),
         type: repoInfo.type,
         messages: newHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        provider: selectedProvider,
-        model: isCustomSelectedModel ? customSelectedModel : selectedModel,
+        provider: FIXED_MODEL_PROVIDER,
+        model: FIXED_MODEL_NAME,
         language: language
       };
 
@@ -556,8 +487,8 @@ const Ask: React.FC<AskProps> = ({
         repo_url: getRepoUrl(repoInfo),
         type: repoInfo.type,
         messages: newHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        provider: selectedProvider,
-        model: isCustomSelectedModel ? customSelectedModel : selectedModel,
+        provider: FIXED_MODEL_PROVIDER,
+        model: FIXED_MODEL_NAME,
         language: language
       };
 
@@ -637,17 +568,9 @@ const Ask: React.FC<AskProps> = ({
     <div>
       <div className="p-4">
         <div className="flex items-center justify-end mb-4">
-          {/* Model selection button */}
-          <button
-            type="button"
-            onClick={() => setIsModelSelectionModalOpen(true)}
-            className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)]/40 bg-[var(--background)]/10 text-[var(--foreground)]/80 hover:bg-[var(--background)]/30 hover:text-[var(--foreground)] transition-colors flex items-center gap-1.5"
-          >
-            <span>{selectedProvider}/{isCustomSelectedModel ? customSelectedModel : selectedModel}</span>
-            <svg className="h-3.5 w-3.5 text-[var(--accent-primary)]/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </button>
+          <span className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)]/40 bg-[var(--background)]/10 text-[var(--foreground)]/80">
+            DeepSeek / deepseek-v4-flash
+          </span>
         </div>
 
         {/* Question input */}
@@ -895,28 +818,6 @@ const Ask: React.FC<AskProps> = ({
         )}
       </div>
 
-      {/* Model Selection Modal */}
-      <ModelSelectionModal
-        isOpen={isModelSelectionModalOpen}
-        onClose={() => setIsModelSelectionModalOpen(false)}
-        provider={selectedProvider}
-        setProvider={setSelectedProvider}
-        model={selectedModel}
-        setModel={setSelectedModel}
-        isCustomModel={isCustomSelectedModel}
-        setIsCustomModel={setIsCustomSelectedModel}
-        customModel={customSelectedModel}
-        setCustomModel={setCustomSelectedModel}
-        isComprehensiveView={isComprehensiveView}
-        setIsComprehensiveView={setIsComprehensiveView}
-        showFileFilters={false}
-        onApply={() => {
-          console.log('Model selection applied:', selectedProvider, selectedModel);
-        }}
-        showWikiType={false}
-        authRequired={false}
-        isAuthLoading={false}
-      />
     </div>
   );
 };

@@ -2,10 +2,18 @@ import contextlib
 import os
 import sqlite3
 from datetime import datetime
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 
 SCHEMA_VERSION = 1
+FINGERPRINT_FIELDS = (
+    "embedding_base_url",
+    "embedding_model",
+    "embedding_dim",
+    "embedding_normalize",
+    "chunker_version",
+    "index_schema_version",
+)
 
 
 class MetaStore:
@@ -140,27 +148,35 @@ class MetaStore:
                 ),
             )
 
-    def assert_compatible(self, repo_id: str, fingerprint: Dict) -> None:
+    def incompatible_fields(self, repo_id: str, fingerprint: Dict) -> List[str]:
         repo = self.get_repo(repo_id)
         if not repo:
-            return
+            return []
 
-        checks = {
-            "embedding_base_url": fingerprint.get("embedding_base_url"),
-            "embedding_model": fingerprint.get("embedding_model"),
-            "embedding_dim": fingerprint.get("embedding_dim"),
-            "embedding_normalize": int(bool(fingerprint.get("embedding_normalize"))),
-            "chunker_version": fingerprint.get("chunker_version"),
-            "index_schema_version": fingerprint.get("index_schema_version", SCHEMA_VERSION),
-        }
-        mismatches = [
-            key for key, expected in checks.items()
-            if repo[key] is not None and repo[key] != expected
+        expected = dict(fingerprint)
+        expected["embedding_normalize"] = int(bool(fingerprint.get("embedding_normalize")))
+        expected["index_schema_version"] = fingerprint.get("index_schema_version", SCHEMA_VERSION)
+        return [
+            key
+            for key in FINGERPRINT_FIELDS
+            if repo[key] is None or repo[key] != expected.get(key)
         ]
+
+    def assert_compatible(self, repo_id: str, fingerprint: Dict) -> None:
+        mismatches = self.incompatible_fields(repo_id, fingerprint)
         if mismatches:
             raise ValueError(
                 "Embedding/index fingerprint changed; rebuild the repository index before continuing. "
                 f"Mismatched fields: {', '.join(mismatches)}"
+            )
+
+    def reset_index_state(self, repo_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM chunk_index WHERE repo_id = ?", (repo_id,))
+            conn.execute("DELETE FROM file_index WHERE repo_id = ?", (repo_id,))
+            conn.execute(
+                "UPDATE repos SET last_indexed_sha = NULL, indexed_at = NULL WHERE id = ?",
+                (repo_id,),
             )
 
     def create_job(self, job_id: str, repo_id: str, from_sha: Optional[str], to_sha: Optional[str]) -> None:

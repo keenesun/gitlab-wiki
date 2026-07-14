@@ -1,7 +1,8 @@
 import hashlib
+import json
 import logging
 import os
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from api.types import Document
 
@@ -12,14 +13,27 @@ def repo_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
-def collection_name_for_repo(repo_url_or_path: str) -> str:
-    return f"repo_{repo_hash(repo_url_or_path)}"
+def fingerprint_hash(fingerprint: Optional[Dict[str, Any]]) -> str:
+    canonical = json.dumps(fingerprint or {}, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def collection_name_for_repo(
+    repo_url_or_path: str,
+    fingerprint: Optional[Dict[str, Any]] = None,
+) -> str:
+    return f"repo_{repo_hash(repo_url_or_path)}_emb_{fingerprint_hash(fingerprint)}"
 
 
 class ChromaStore:
     """Thin ChromaDB adapter with lazy imports so the app can fail with a clear setup message."""
 
-    def __init__(self, persist_dir: str, repo_url_or_path: str):
+    def __init__(
+        self,
+        persist_dir: str,
+        repo_url_or_path: str,
+        fingerprint: Optional[Dict[str, Any]] = None,
+    ):
         try:
             import chromadb
         except ImportError as exc:
@@ -27,7 +41,7 @@ class ChromaStore:
 
         os.makedirs(persist_dir, exist_ok=True)
         self.client = chromadb.PersistentClient(path=persist_dir)
-        self.collection_name = collection_name_for_repo(repo_url_or_path)
+        self.collection_name = collection_name_for_repo(repo_url_or_path, fingerprint)
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
     @staticmethod

@@ -311,7 +311,11 @@ class RAG:
 
         try:
             retrieve_embedder = self.query_embedder if self.is_ollama_embedder else self.embedder
-            chroma_store = ChromaStore(self.db_manager.chroma_path, self.db_manager.repo_url_or_path)
+            chroma_store = ChromaStore(
+                self.db_manager.chroma_path,
+                self.db_manager.repo_url_or_path,
+                fingerprint=self.db_manager.index_fingerprint,
+            )
             self.retriever = ChromaRetriever(
                 store=chroma_store,
                 embedder=retrieve_embedder,
@@ -358,8 +362,4 @@ class RAG:
 
         except Exception as e:
             logger.error(f"Error in RAG call: {str(e)}")
-            error_response = RAGAnswer(
-                rationale="Error occurred while processing the query.",
-                answer=f"I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
-            )
-            return error_response, []
+            raise RuntimeError("Repository document retrieval failed") from e
