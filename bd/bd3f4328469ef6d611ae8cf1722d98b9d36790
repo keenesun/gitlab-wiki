@@ -1,0 +1,183 @@
+src/components/Ask.tsx
+  s_af32ecca759f55::t_32b850af3541a3 23,572
+  s_af32ecca759f55::t_c2b07be436f608 248-249,490-491
+  s_af32ecca759f55::t_7b313ce5feacb8 22,24
+  s_af32ecca759f55::t_fdd7ffa054ca59 571,573
+src/app/api/models/config/route.ts
+  s_af32ecca759f55::t_242b2399913665 11
+  s_af32ecca759f55::t_f2ada974c8f16d 3-10,12-18,21
+src/components/ModelSelectionModal.tsx
+  s_af32ecca759f55::t_f7e92b146a76b4 143
+  s_af32ecca759f55::t_5b889128726c04 197
+  s_af32ecca759f55::t_48a4dd05c59a93 166-168,171-196,198-214
+  s_af32ecca759f55::t_803f44a01eaa19 36
+  s_af32ecca759f55::t_088b4a3ba70bf8 76
+src/app/page.tsx
+  s_af32ecca759f55::t_3626abf3657405 301-304
+  s_af32ecca759f55::t_f60097dadfdd3d 406
+  s_af32ecca759f55::t_a1a97e51aee74f 15
+  s_af32ecca759f55::t_6c354e967ff223 191-202
+  s_af32ecca759f55::t_8494b239d4ff21 63-66
+  s_af32ecca759f55::t_588bdc16c664aa 14,16
+  s_af32ecca759f55::t_b9fc943d0d9c89 95-97
+  s_af32ecca759f55::t_44360b3aa72a01 156
+  s_af32ecca759f55::t_05cb08e60976da 244,324
+  s_af32ecca759f55::t_b0285ba3267cba 344-346
+  s_af32ecca759f55::t_4f201e33fde51a 203-205
+api/rag.py
+  s_af32ecca759f55::t_861bcd6651ee4d 365
+  s_af32ecca759f55::t_458af0d5b8f322 314-318
+src/app/[owner]/[repo]/slides/page.tsx
+  s_af32ecca759f55::t_7c96bae3fd2a90 528
+  s_af32ecca759f55::t_da1f954817dd9a 30-32
+  s_af32ecca759f55::t_7b4a159eb69d64 253
+  s_af32ecca759f55::t_28c8b8c253d6ec 874
+  s_af32ecca759f55::t_cc85062e047b0d 11,13
+  s_af32ecca759f55::t_0ecd2a2a2ad730 12
+api/websocket_wiki.py
+  s_af32ecca759f55::t_da6c24af9e4f7f 66-73
+  s_af32ecca759f55::t_f8974800398251 204,210,216-239,241-257
+  s_af32ecca759f55::t_5ccb9edb5ead25 215
+api/db/meta_store.py
+  s_af32ecca759f55::t_94bf4bbbd09cfa 173-181
+  s_af32ecca759f55::t_5f0a8761c2be19 151,154-162,164-166
+  s_af32ecca759f55::t_376a1c33e73adf 5,9-16
+src/components/UserSelector.tsx
+  s_af32ecca759f55::t_58ab13dfc2f5b6 276-278
+  s_af32ecca759f55::t_305802d47c57dc 374-375
+  s_af32ecca759f55::t_cc436e1ee6ea91 54
+  s_af32ecca759f55::t_e9a7c4ae0f8aab 31
+  s_af32ecca759f55::t_07f079f578c519 261
+  s_af32ecca759f55::t_d1dbb7e835a330 272
+api/config.py
+  s_af32ecca759f55::t_170b67c4027d77 237-244,246-252,257,260-261,263-268
+  s_af32ecca759f55::t_4ed54d49ab8d36 355,357-358
+  s_af32ecca759f55::t_66a2716b02e1d2 35-69
+  s_af32ecca759f55::t_75f86603d1756a 27
+  s_af32ecca759f55::t_4f49c3e5e2c893 203-220
+  s_af32ecca759f55::t_c33c6ba3228513 28-29
+  s_af32ecca759f55::t_74d9d60fc7adc2 7-9
+src/components/Mermaid.tsx
+  s_af32ecca759f55::t_bad0d05dd08f9b 1
+  s_af32ecca759f55::t_01a0b1c5ab2565 320-321
+  s_af32ecca759f55::t_1e0163b368016f 322-326
+  s_af32ecca759f55::t_d386a577c9fbfd 377-378
+  s_af32ecca759f55::t_303d68ce80c7dc 178-185
+api/chunker.py
+  s_af32ecca759f55::t_b9273abfbe643b 221-226,229,234
+  s_af32ecca759f55::t_0040989af32cb4 122-123
+  s_af32ecca759f55::t_97c31407d9bd32 9-11
+  s_af32ecca759f55::t_46753226e0cea4 85-86,88,90-94,96-98
+  s_af32ecca759f55::t_21c9981d803169 136,139-172,175-204,208-218
+  s_af32ecca759f55::t_a426d83bb20d7c 219-220
+  s_af32ecca759f55::t_b7c41b22b6db98 235
+api/db/chroma_store.py
+  s_af32ecca759f55::t_600517539509b4 44
+  s_af32ecca759f55::t_0e180f1d042859 16-25,31-36
+  s_af32ecca759f55::t_eb37503510f66a 2,5
+api/incremental.py
+  s_af32ecca759f55::t_37176cc9d658fd 45-59
+  s_af32ecca759f55::t_ad09870b6cc64d 119
+src/components/theme-toggle.tsx
+  s_af32ecca759f55::t_a1a3ef120113d4 22
+  s_af32ecca759f55::t_b87a527c2f70a6 27,42
+  s_af32ecca759f55::t_28b4b2a5b28fa4 3,7-14
+src/app/[owner]/[repo]/workshop/page.tsx
+  s_af32ecca759f55::t_ac1ec3e4c93407 305
+  s_af32ecca759f55::t_b73a8dda2f31b2 12,14
+  s_af32ecca759f55::t_8c328d19c361e9 513
+  s_af32ecca759f55::t_3cc79949e9319a 31-33
+  s_af32ecca759f55::t_469428938bce34 13
+src/app/[owner]/[repo]/page.tsx
+  s_af32ecca759f55::t_1548e587e1076b 508
+  s_af32ecca759f55::t_ef653cf4f83651 548
+  s_af32ecca759f55::t_fd851447d1d614 539-540
+  s_af32ecca759f55::t_fb2f43aeb7a5ed 1030-1038,1366
+  s_af32ecca759f55::t_a213633f938cc2 479
+  s_af32ecca759f55::t_f9017a435c64a4 1936-1939
+  s_af32ecca759f55::t_2ed51ef7cc6ce0 1957-1958
+  s_af32ecca759f55::t_149b37099e217e 697
+  s_af32ecca759f55::t_29b5a9f2eeb5db 133-135
+  s_af32ecca759f55::t_14d2ae0f1e262d 1629-1632
+  s_af32ecca759f55::t_cc5c4f2c6e047e 2309
+  s_af32ecca759f55::t_7cdeef2d073ef9 2288-2295
+  s_af32ecca759f55::t_c39e3a475fc9f0 1730
+  s_af32ecca759f55::t_cd4c180f52a814 858-859,868,874,879-883,887-898,905,908-909,913-917
+  s_af32ecca759f55::t_116a75e1b646df 90
+  s_af32ecca759f55::t_41a0bb78d7b85c 91
+  s_af32ecca759f55::t_91e08ad06f12d4 92-106
+  s_af32ecca759f55::t_5343e2121efe94 418-421,429-432,435,443,448
+  s_af32ecca759f55::t_76f59d5424a3fc 716
+  s_af32ecca759f55::t_0b4396b852cd2c 853
+  s_af32ecca759f55::t_0cb9708c3b9313 655-662
+  s_af32ecca759f55::t_382ec7aa0e88a0 997-999
+  s_af32ecca759f55::t_f76b098aae3489 1198
+  s_af32ecca759f55::t_1233b9f3ce0f8f 1381,1386,1752-1761,1763
+  s_af32ecca759f55::t_f9cdf73dcf5ac2 89,107
+  s_af32ecca759f55::t_ec815f4919008b 919,925-926
+  s_af32ecca759f55::t_51c20a37d52ca4 959-963,968,970-971
+  s_af32ecca759f55::t_267300ad38d2bb 1363-1365
+  s_af32ecca759f55::t_d65ed0a6510248 1367-1368
+  s_af32ecca759f55::t_230a85d5bd9eaa 1378-1380
+  s_af32ecca759f55::t_e7f0724ae24d0b 1382-1385
+  s_af32ecca759f55::t_aa253ff81a946f 1764
+api/data_pipeline.py
+  s_af32ecca759f55::t_ef134f57a4aa14 139
+  s_af32ecca759f55::t_6b631132e5a340 26,30
+  s_af32ecca759f55::t_c01b797ec5b35c 455,511-521,528-534,540-543,546-561,564-575,577-590
+  s_af32ecca759f55::t_382e5908b177ba 1112,1118-1121
+  s_af32ecca759f55::t_1fb4b7afdaabaf 562-563
+  s_af32ecca759f55::t_94ba2a1b51fa22 526
+  s_af32ecca759f55::t_fe2a63fa3ee6df 410
+  s_af32ecca759f55::t_559a4d1f654f7c 1117
+  s_af32ecca759f55::t_e4cf32f4eff1bc 1173
+  s_af32ecca759f55::t_04d0fab8714c3b 1079,1082-1088
+  s_af32ecca759f55::t_24e896e59f48ce 1137-1143,1148-1151
+  s_af32ecca759f55::t_238333d90df6b0 1183-1187
+  s_af32ecca759f55::t_065c2eb8740979 29
+  s_af32ecca759f55::t_372bb881c45f06 1089
+  s_af32ecca759f55::t_9c2c9dcd8db882 1157
+  s_af32ecca759f55::t_1121f98c8b8e3f 54-57
+  s_af32ecca759f55::t_32dd0d7e929341 480
+  s_af32ecca759f55::t_5148cdfe082a9a 1000-1007
+  s_af32ecca759f55::t_1e787fc032c83d 169
+  s_af32ecca759f55::t_db8a326475af7b 912
+  s_af32ecca759f55::t_0b16f2b777b8c3 631,633-639
+  s_af32ecca759f55::t_d4d0eea9ccae99 28
+  s_af32ecca759f55::t_e2e7765eb11db5 370-379,447-454
+  s_af32ecca759f55::t_3b971bfc672c06 954
+  s_af32ecca759f55::t_f6b603989a627b 958-968,970
+  s_af32ecca759f55::t_123b23945172de 613,623
+  s_af32ecca759f55::t_f5b1a2b3e2c647 1097-1110
+  s_af32ecca759f55::t_882a37086a4b86 380-382
+  s_af32ecca759f55::t_f8857adc34b80d 456-458
+  s_af32ecca759f55::t_a14e8d82be288b 1152
+api/api.py
+  s_af32ecca759f55::t_4f6e814610893f 185
+  s_af32ecca759f55::t_2dbd419b0db664 182-184,187-192,194,196
+  s_af32ecca759f55::t_c019bfe9da8627 186
+tests/unit/test_embedding_pipeline.py
+  s_af32ecca759f55::t_749e2def6fa636 1-109,111-113,128-131,144-167
+  s_af32ecca759f55::t_2a54036f8f44ff 110,114-127,132-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "bdbd3f4328469ef6d611ae8cf1722d98b9d36790",
+  "prompts": {},
+  "humans": {
+    "h_63efa0547f8ed4": {
+      "author": "keenesun <keene.sun@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_af32ecca759f55": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "715c8bf7-4eeb-45a3-ba17-5682552878dc",
+        "model": "3edb23acd7151b09"
+      },
+      "human_author": "keenesun <keene.sun@gmail.com>"
+    }
+  }
+}
