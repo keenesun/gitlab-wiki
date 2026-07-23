@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import List, Optional, Dict, Any
@@ -63,6 +64,10 @@ class ChatCompletionRequest(BaseModel):
     excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
+    skip_rag: bool = Field(
+        False,
+        description="Generate directly from the supplied prompt without preparing repository retrieval",
+    )
     require_rag_context: bool = Field(
         False,
         description="Fail the request instead of calling the model when repository context is unavailable",
@@ -71,6 +76,89 @@ class ChatCompletionRequest(BaseModel):
         None,
         description="Optional concise query used only for repository retrieval",
     )
+
+class IndexRequest(BaseModel):
+    repo_url: str
+    type: str = "github"
+    token: Optional[str] = None
+    provider: str = "google"
+    model: Optional[str] = None
+    excluded_dirs: Optional[str] = None
+    excluded_files: Optional[str] = None
+    included_dirs: Optional[str] = None
+    included_files: Optional[str] = None
+
+
+def _split_filter_paths(value: Optional[str]) -> Optional[List[str]]:
+    if not value:
+        return None
+    paths = [unquote(item) for item in value.split("\n") if item.strip()]
+    return paths or None
+
+
+async def handle_websocket_index(websocket: WebSocket):
+    """Build a repository index in a worker thread and stream structured progress events."""
+    await websocket.accept()
+    worker = None
+
+    try:
+        request = IndexRequest(**await websocket.receive_json())
+        loop = asyncio.get_running_loop()
+        events: asyncio.Queue = asyncio.Queue()
+
+        def report(event: Dict[str, object]) -> None:
+            loop.call_soon_threadsafe(events.put_nowait, event)
+
+        async def build_index() -> None:
+            try:
+                rag = RAG(provider=request.provider, model=request.model)
+                await asyncio.to_thread(
+                    rag.prepare_retriever,
+                    request.repo_url,
+                    request.type,
+                    request.token,
+                    _split_filter_paths(request.excluded_dirs),
+                    _split_filter_paths(request.excluded_files),
+                    _split_filter_paths(request.included_dirs),
+                    _split_filter_paths(request.included_files),
+                    report,
+                )
+                report({
+                    "type": "complete",
+                    "stage": "complete",
+                    "current": 1,
+                    "total": 1,
+                    "message": "代码索引准备完成",
+                    "file": None,
+                })
+            except Exception as exc:
+                logger.exception("Repository indexing failed")
+                report({
+                    "type": "error",
+                    "stage": "error",
+                    "current": 0,
+                    "total": 1,
+                    "message": str(exc),
+                    "file": None,
+                })
+
+        worker = asyncio.create_task(build_index())
+        while True:
+            event = await events.get()
+            await websocket.send_json(event)
+            if event.get("type") in {"complete", "error"}:
+                break
+        await worker
+    except WebSocketDisconnect:
+        logger.info("Index progress WebSocket disconnected")
+    finally:
+        if worker and not worker.done():
+            worker.cancel()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
 
 async def handle_websocket_chat(websocket: WebSocket):
     """
@@ -118,8 +206,11 @@ async def handle_websocket_chat(websocket: WebSocket):
                 included_files = [unquote(file_pattern) for file_pattern in request.included_files.split('\n') if file_pattern.strip()]
                 logger.info(f"Using custom included files: {included_files}")
 
-            request_rag.prepare_retriever(request.repo_url, request.type, request.token, excluded_dirs, excluded_files, included_dirs, included_files)
-            logger.info(f"Retriever prepared for {request.repo_url}")
+            if not request.skip_rag:
+                request_rag.prepare_retriever(request.repo_url, request.type, request.token, excluded_dirs, excluded_files, included_dirs, included_files)
+                logger.info(f"Retriever prepared for {request.repo_url}")
+            else:
+                logger.info("Skipping repository retrieval preparation for this request")
         except ValueError as e:
             if "No valid documents with embeddings found" in str(e):
                 logger.error(f"No valid embeddings found: {str(e)}")
@@ -205,7 +296,7 @@ async def handle_websocket_chat(websocket: WebSocket):
         context_text = ""
         retrieved_documents = None
 
-        if not input_too_large:
+        if not input_too_large and not request.skip_rag:
             try:
                 rag_query = (request.rag_query or "").strip() or query
                 if request.filePath:

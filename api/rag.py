@@ -271,7 +271,8 @@ class RAG:
 
     def prepare_retriever(self, repo_url_or_path: str, type: str = "github", access_token: str = None,
                       excluded_dirs: List[str] = None, excluded_files: List[str] = None,
-                      included_dirs: List[str] = None, included_files: List[str] = None):
+                      included_dirs: List[str] = None, included_files: List[str] = None,
+                      progress_callback=None):
         """
         Prepare the retriever for a repository.
         Will load from local storage if available, or index from scratch.
@@ -294,7 +295,8 @@ class RAG:
             excluded_dirs=excluded_dirs,
             excluded_files=excluded_files,
             included_dirs=included_dirs,
-            included_files=included_files
+            included_files=included_files,
+            progress_callback=progress_callback,
         )
         logger.info(f"Loaded {len(self.transformed_docs)} documents for retrieval")
 

@@ -6,7 +6,7 @@ import tiktoken
 import logging
 import base64
 import glob
-from typing import List
+from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse, quote
 import requests
 from requests.exceptions import RequestException
@@ -28,6 +28,28 @@ MAX_EMBEDDING_TOKENS = 8192
 MAX_EMBEDDING_CHARACTERS = int(os.environ.get("MAX_EMBEDDING_CHARACTERS", "32768"))
 MAX_EMBEDDING_BATCH_SIZE = int(os.environ.get("MAX_EMBEDDING_BATCH_SIZE", "512"))
 MAX_SOURCE_FILE_BYTES = int(os.environ.get("MAX_SOURCE_FILE_BYTES", str(10 * 1024 * 1024)))
+
+ProgressCallback = Optional[Callable[[Dict[str, object]], None]]
+
+
+def _report_progress(
+    callback: ProgressCallback,
+    stage: str,
+    current: int = 0,
+    total: int = 0,
+    message: str = "",
+    file_path: Optional[str] = None,
+) -> None:
+    if callback is None:
+        return
+    callback({
+        "type": "progress",
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "message": message,
+        "file": file_path,
+    })
 
 
 def _repo_id(repo_url_or_path: str) -> str:
@@ -192,9 +214,10 @@ def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_
 # Alias for backward compatibility
 download_github_repo = download_repo
 
-def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder: bool = None, 
+def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder: bool = None,
                       excluded_dirs: List[str] = None, excluded_files: List[str] = None,
-                      included_dirs: List[str] = None, included_files: List[str] = None):
+                      included_dirs: List[str] = None, included_files: List[str] = None,
+                      progress_callback: ProgressCallback = None):
     """
     Recursively reads all documents in a directory and its subdirectories.
 
@@ -348,10 +371,27 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
 
             return not is_excluded
 
+    candidate_total = sum(
+        len(glob.glob(f"{path}/**/*{ext}", recursive=True))
+        for ext in [*code_extensions, *doc_extensions]
+    )
+    scanned_files = 0
+    _report_progress(progress_callback, "reading", 0, candidate_total, "正在读取代码文件")
+
     # Process code files first
     for ext in code_extensions:
         files = glob.glob(f"{path}/**/*{ext}", recursive=True)
         for file_path in files:
+            scanned_files += 1
+            rel_path = os.path.relpath(file_path, path)
+            _report_progress(
+                progress_callback,
+                "reading",
+                scanned_files,
+                candidate_total,
+                "正在读取代码文件",
+                rel_path,
+            )
             # Check if file should be processed based on inclusion/exclusion rules
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
                 continue
@@ -429,6 +469,16 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
     for ext in doc_extensions:
         files = glob.glob(f"{path}/**/*{ext}", recursive=True)
         for file_path in files:
+            scanned_files += 1
+            rel_path = os.path.relpath(file_path, path)
+            _report_progress(
+                progress_callback,
+                "reading",
+                scanned_files,
+                candidate_total,
+                "正在读取代码文件",
+                rel_path,
+            )
             # Check if file should be processed based on inclusion/exclusion rules
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
                 continue
@@ -495,6 +545,13 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
             except Exception as e:
                 logger.error(f"Error reading {file_path}: {e}")
 
+    _report_progress(
+        progress_callback,
+        "reading",
+        candidate_total,
+        candidate_total,
+        f"已读取 {len(documents)} 个有效文件",
+    )
     logger.info(f"Found {len(documents)} documents")
     return documents
 
@@ -524,6 +581,7 @@ def embed_documents(
     embedder,
     embedder_type: str = "openai",
     batch_size: int = 32,
+    progress_callback: ProgressCallback = None,
 ) -> List[Document]:
     """Embed chunked documents and attach exactly one vector to each non-empty chunk."""
     if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
@@ -533,9 +591,19 @@ def embed_documents(
             f"Embedding batch_size={batch_size} exceeds MAX_EMBEDDING_BATCH_SIZE={MAX_EMBEDDING_BATCH_SIZE}"
         )
 
+    _report_progress(progress_callback, "embedding", 0, len(documents), "正在生成代码向量")
+
     if embedder_type == "ollama":
         processor = OllamaDocumentProcessor(embedder=embedder)
-        return processor(documents)
+        embedded = processor(documents)
+        _report_progress(
+            progress_callback,
+            "embedding",
+            len(embedded),
+            len(documents),
+            "代码向量生成完成",
+        )
+        return embedded
 
     model_kwargs = getattr(embedder, "model_kwargs", {}) or {}
     model_name = model_kwargs.get("model", "unknown")
@@ -590,12 +658,21 @@ def embed_documents(
                 )
             doc.vector = vector
 
+        _report_progress(
+            progress_callback,
+            "embedding",
+            min(i + len(batch), len(documents)),
+            len(documents),
+            "正在生成代码向量",
+        )
+
     return documents
 
 
 def transform_documents_and_save_to_db(
     documents: List[Document], db_path: str, embedder_type: str = None,
-    is_ollama_embedder: bool = None, already_chunked: bool = False
+    is_ollama_embedder: bool = None, already_chunked: bool = False,
+    progress_callback: ProgressCallback = None,
 ) -> List[Document]:
     """
     Transforms a list of documents (chunks and embeds) and saves them to a local pickle file.
@@ -624,7 +701,13 @@ def transform_documents_and_save_to_db(
     batch_size = embedder_config.get("batch_size", 500)
 
     # Embed documents
-    embedded = embed_documents(documents, embedder, embedder_type, batch_size)
+    embedded = embed_documents(
+        documents,
+        embedder,
+        embedder_type,
+        batch_size,
+        progress_callback=progress_callback,
+    )
 
     # Save to pickle for caching
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -915,7 +998,8 @@ class DatabaseManager:
     def prepare_database(self, repo_url_or_path: str, repo_type: str = None, access_token: str = None,
                          embedder_type: str = None, is_ollama_embedder: bool = None,
                          excluded_dirs: List[str] = None, excluded_files: List[str] = None,
-                         included_dirs: List[str] = None, included_files: List[str] = None) -> List[Document]:
+                         included_dirs: List[str] = None, included_files: List[str] = None,
+                         progress_callback: ProgressCallback = None) -> List[Document]:
         """
         Create a new database from the repository.
 
@@ -940,9 +1024,17 @@ class DatabaseManager:
             embedder_type = 'ollama' if is_ollama_embedder else None
         
         self.reset_database()
+        _report_progress(progress_callback, "cloning", 0, 1, "正在准备仓库代码")
         self._create_repo(repo_url_or_path, repo_type, access_token)
-        return self.prepare_db_index(embedder_type=embedder_type, excluded_dirs=excluded_dirs, excluded_files=excluded_files,
-                                   included_dirs=included_dirs, included_files=included_files)
+        _report_progress(progress_callback, "cloning", 1, 1, "仓库代码准备完成")
+        return self.prepare_db_index(
+            embedder_type=embedder_type,
+            excluded_dirs=excluded_dirs,
+            excluded_files=excluded_files,
+            included_dirs=included_dirs,
+            included_files=included_files,
+            progress_callback=progress_callback,
+        )
 
     def reset_database(self):
         """
@@ -1037,9 +1129,10 @@ class DatabaseManager:
             logger.error(f"Failed to create repository structure: {e}")
             raise
 
-    def prepare_db_index(self, embedder_type: str = None, is_ollama_embedder: bool = None, 
+    def prepare_db_index(self, embedder_type: str = None, is_ollama_embedder: bool = None,
                         excluded_dirs: List[str] = None, excluded_files: List[str] = None,
-                        included_dirs: List[str] = None, included_files: List[str] = None) -> List[Document]:
+                        included_dirs: List[str] = None, included_files: List[str] = None,
+                        progress_callback: ProgressCallback = None) -> List[Document]:
         """
         Prepare the indexed database for the repository.
 
@@ -1101,6 +1194,7 @@ class DatabaseManager:
             excluded_files=excluded_files,
             included_dirs=included_dirs,
             included_files=included_files,
+            progress_callback=progress_callback,
         )
         current_file_paths = {
             (getattr(doc, "meta_data", {}) or {}).get("file_path")
@@ -1151,6 +1245,21 @@ class DatabaseManager:
                             len(missing_cached_files),
                         )
                     else:
+                        _report_progress(
+                            progress_callback,
+                            "chunking",
+                            len(documents),
+                            len(documents),
+                            "已复用代码切片缓存",
+                        )
+                        _report_progress(
+                            progress_callback,
+                            "embedding",
+                            len(documents),
+                            len(documents),
+                            "已复用代码向量缓存",
+                        )
+                        _report_progress(progress_callback, "indexing", 0, 1, "正在同步检索索引")
                         chroma_store = ChromaStore(
                             os.path.join(root_path, "chromadb"),
                             self.repo_url_or_path,
@@ -1163,6 +1272,7 @@ class DatabaseManager:
                             self.repo_paths["save_repo_dir"],
                             documents,
                         )
+                        _report_progress(progress_callback, "indexing", 1, 1, "检索索引准备完成")
                         return documents
             except Exception as e:
                 logger.error(f"Error loading existing database: {e}")
@@ -1171,15 +1281,25 @@ class DatabaseManager:
         # prepare the database
         logger.info("Creating new database...")
         documents = current_documents
+        _report_progress(progress_callback, "chunking", 0, len(documents), "正在切分代码文件")
         chunked_documents = chunk_documents(documents, repo_id)
+        _report_progress(
+            progress_callback,
+            "chunking",
+            len(documents),
+            len(documents),
+            f"已生成 {len(chunked_documents)} 个代码片段",
+        )
         transformed_docs = transform_documents_and_save_to_db(
             chunked_documents,
             self.repo_paths["save_db_file"],
             embedder_type=embedder_type,
             already_chunked=True,
+            progress_callback=progress_callback,
         )
         logger.info(f"Total documents: {len(documents)}")
         transformed_docs = enrich_transformed_documents(transformed_docs, repo_id)
+        _report_progress(progress_callback, "indexing", 0, 1, "正在写入检索索引")
         chroma_store = ChromaStore(
             os.path.join(root_path, "chromadb"),
             self.repo_url_or_path,
@@ -1192,6 +1312,7 @@ class DatabaseManager:
             self.repo_paths["save_repo_dir"],
             transformed_docs,
         )
+        _report_progress(progress_callback, "indexing", 1, 1, "检索索引准备完成")
         logger.info(f"Total transformed documents: {len(transformed_docs)}")
         return transformed_docs
 

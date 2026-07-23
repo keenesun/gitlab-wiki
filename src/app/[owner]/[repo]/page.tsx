@@ -34,6 +34,15 @@ interface WikiPage {
   children?: string[];
 }
 
+interface IndexProgress {
+  type: 'progress' | 'complete' | 'error';
+  stage: 'cloning' | 'reading' | 'chunking' | 'embedding' | 'indexing' | 'complete' | 'error';
+  current: number;
+  total: number;
+  message: string;
+  file?: string | null;
+}
+
 interface WikiStructure {
   id: string;
   title: string;
@@ -89,6 +98,13 @@ const wikiStyles = `
 const FIXED_MODEL_PROVIDER = 'direct';
 const FIXED_MODEL_NAME = 'deepseek-v4-flash';
 const WIKI_STRUCTURE_TIMEOUT_MS = 15 * 60 * 1000;
+const INDEX_STAGES: Array<{ id: IndexProgress['stage']; label: string }> = [
+  { id: 'cloning', label: '准备仓库' },
+  { id: 'reading', label: '读取代码' },
+  { id: 'chunking', label: '切分代码' },
+  { id: 'embedding', label: '生成向量' },
+  { id: 'indexing', label: '写入索引' },
+];
 const UNGROUNDED_WIKI_CONTENT_PATTERNS = [
   /由于未提供任何\s*\[RELEVANT_SOURCE_FILES\]/i,
   /未提供任何代码源文件/i,
@@ -108,6 +124,31 @@ const isUngroundedWikiContent = (content: string): boolean => {
 // Helper function to generate cache key for localStorage
 const getCacheKey = (owner: string, repo: string, repoType: string, language: string, isComprehensive: boolean = true): string => {
   return `deepwiki_cache_${repoType}_${owner}_${repo}_${language}_${isComprehensive ? 'comprehensive' : 'concise'}`;
+};
+
+type RepositorySize = 'small' | 'medium' | 'large';
+
+interface WikiPagePlan {
+  fileCount: number;
+  repositorySize: RepositorySize;
+  pageRange: string;
+}
+
+const getWikiPagePlan = (fileTree: string): WikiPagePlan => {
+  const fileCount = fileTree
+    .split('\n')
+    .map(path => path.trim())
+    .filter(Boolean).length;
+
+  if (fileCount <= 100) {
+    return { fileCount, repositorySize: 'small', pageRange: '4-8' };
+  }
+
+  if (fileCount <= 500) {
+    return { fileCount, repositorySize: 'medium', pageRange: '8-16' };
+  }
+
+  return { fileCount, repositorySize: 'large', pageRange: '16-30' };
 };
 
 // Helper function to add tokens and other parameters to request body
@@ -246,6 +287,7 @@ export default function RepoWikiPage() {
   const [currentToken, setCurrentToken] = useState(token); // Track current effective token
   const [effectiveRepoInfo, setEffectiveRepoInfo] = useState(repoInfo); // Track effective repo info with cached data
   const [embeddingError, setEmbeddingError] = useState(false);
+  const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null);
 
   const excludedDirs = searchParams.get('excluded_dirs') || '';
   const excludedFiles = searchParams.get('excluded_files') || '';
@@ -264,6 +306,11 @@ export default function RepoWikiPage() {
   // Note: In a multi-threaded environment, additional synchronization would be needed,
   // but in React's single-threaded model, this is safe as long as we set the flag before any async operations
   const activeContentRequests = useRef(new Map<string, boolean>()).current;
+  const generationQueueRef = useRef<WikiPage[]>([]);
+  const generationQueueRunningRef = useRef(false);
+  const generationSessionRef = useRef(0);
+  const indexReadyPromiseRef = useRef<Promise<void> | null>(null);
+  const indexSocketRef = useRef<WebSocket | null>(null);
   const [structureRequestInProgress, setStructureRequestInProgress] = useState(false);
   // Create a flag to track if data was loaded from cache to prevent immediate re-save
   const cacheLoadedSuccessfully = useRef(false);
@@ -369,6 +416,82 @@ export default function RepoWikiPage() {
     fetchAuthStatus();
   }, []);
 
+  const startRepositoryIndex = useCallback((): Promise<void> => {
+    indexSocketRef.current?.close();
+    setIndexProgress({
+      type: 'progress',
+      stage: 'cloning',
+      current: 0,
+      total: 1,
+      message: '正在准备仓库代码',
+      file: null,
+    });
+
+    const promise = new Promise<void>((resolve) => {
+      const serverBaseUrl = process.env.SERVER_BASE_URL || 'http://localhost:8001';
+      const wsBaseUrl = serverBaseUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
+      const ws = new WebSocket(`${wsBaseUrl}/ws/index`);
+      indexSocketRef.current = ws;
+      let settled = false;
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      ws.onopen = () => {
+        const requestBody: Record<string, unknown> = {
+          repo_url: getRepoUrl(effectiveRepoInfo),
+          type: effectiveRepoInfo.type,
+          provider: FIXED_MODEL_PROVIDER,
+          model: FIXED_MODEL_NAME,
+          language,
+          excluded_dirs: modelExcludedDirs,
+          excluded_files: modelExcludedFiles,
+          included_dirs: modelIncludedDirs,
+          included_files: modelIncludedFiles,
+        };
+        if (currentToken) requestBody.token = currentToken;
+        ws.send(JSON.stringify(requestBody));
+      };
+
+      ws.onmessage = event => {
+        try {
+          const progress = JSON.parse(event.data) as IndexProgress;
+          setIndexProgress(progress);
+          if (progress.type === 'complete' || progress.type === 'error') {
+            if (progress.type === 'error') setEmbeddingError(true);
+            finish();
+          }
+        } catch (error) {
+          console.warn('Invalid index progress event:', error);
+        }
+      };
+
+      ws.onerror = () => {
+        setIndexProgress({
+          type: 'error',
+          stage: 'error',
+          current: 0,
+          total: 1,
+          message: '代码索引进度连接失败，将在生成页面时重试',
+          file: null,
+        });
+        finish();
+      };
+
+      ws.onclose = finish;
+    });
+
+    indexReadyPromiseRef.current = promise;
+    return promise;
+  }, [currentToken, effectiveRepoInfo, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles]);
+
+  useEffect(() => () => {
+    indexSocketRef.current?.close();
+  }, []);
+
   // Generate content for a wiki page
   const generatePageContent = useCallback(async (page: WikiPage, owner: string, repo: string) => {
     return new Promise<void>(async (resolve) => {
@@ -405,9 +528,14 @@ export default function RepoWikiPage() {
         // Store the initially generated content BEFORE rendering/potential modification
         setGeneratedPages(prev => ({
           ...prev,
-          [page.id]: { ...page, content: 'Loading...' } // Placeholder
+          [page.id]: { ...page, content: '' }
         }));
         setOriginalMarkdown(prev => ({ ...prev, [page.id]: '' })); // Clear previous original
+
+        // Wait for the background repository index before requesting grounded page content.
+        if (indexReadyPromiseRef.current) {
+          await indexReadyPromiseRef.current;
+        }
 
         // Make API call to generate page content
         console.log(`Starting content generation for page: ${page.title}`);
@@ -594,6 +722,10 @@ Remember:
             // Handle incoming messages
             ws.onmessage = (event) => {
               content += event.data;
+              setGeneratedPages(prev => ({
+                ...prev,
+                [page.id]: { ...page, content }
+              }));
             };
 
             // Handle WebSocket close
@@ -640,6 +772,10 @@ Remember:
               const { done, value } = await reader.read();
               if (done) break;
               content += decoder.decode(value, { stream: true });
+              setGeneratedPages(prev => ({
+                ...prev,
+                [page.id]: { ...page, content }
+              }));
             }
             // Ensure final decoding
             content += decoder.decode();
@@ -713,16 +849,18 @@ Remember:
 
     try {
       setStructureRequestInProgress(true);
-      setLoadingMessage('正在准备索引并生成 Wiki 结构，首次处理可能需要几分钟...');
+      setLoadingMessage('正在生成 Wiki 目录，代码索引正在后台同步构建...');
 
       // Get repository URL
       const repoUrl = getRepoUrl(effectiveRepoInfo);
+      const wikiPagePlan = getWikiPagePlan(fileTree);
 
       // Prepare request body
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const requestBody: Record<string, any> = {
         repo_url: repoUrl,
         type: effectiveRepoInfo.type,
+        skip_rag: true,
         messages: [{
           role: 'user',
 content: `Analyze this GitHub repository ${owner}/${repo} and create a wiki structure for it.
@@ -842,7 +980,7 @@ IMPORTANT FORMATTING INSTRUCTIONS:
 - Start directly with <wiki_structure> and end with </wiki_structure>
 
 IMPORTANT:
-1. Create ${isComprehensiveView ? '8-12' : '4-6'} pages that would make a ${isComprehensiveView ? 'comprehensive' : 'concise'} wiki for this repository
+1. The repository contains ${wikiPagePlan.fileCount} files and is classified as a ${wikiPagePlan.repositorySize} repository. Create ${wikiPagePlan.pageRange} pages that provide appropriate coverage for this repository size.
 2. Each page should focus on a specific aspect of the codebase (e.g., architecture, key features, setup)
 3. The relevant_files should be actual files from the repository that would be used to generate that page
 4. Return ONLY valid XML with the structure specified above, with no markdown code block delimiters`
@@ -1119,70 +1257,42 @@ IMPORTANT:
       setWikiStructure(wikiStructure);
       setCurrentPageId(pages.length > 0 ? pages[0].id : undefined);
 
-      // Start generating content for all pages with controlled concurrency
+      // Make the Wiki available as soon as its structure is ready. Page content continues in the background.
       if (pages.length > 0) {
-        // Mark all pages as in progress
-        const initialInProgress = new Set(pages.map(p => p.id));
-        setPagesInProgress(initialInProgress);
+        const generationSession = ++generationSessionRef.current;
+        generationQueueRef.current = [...pages];
+        setPagesInProgress(new Set(pages.map(page => page.id)));
+        setIsLoading(false);
+        setLoadingMessage(`Wiki 目录已生成，正在后台生成 ${pages.length} 个页面...`);
 
-        console.log(`Starting generation for ${pages.length} pages with controlled concurrency`);
+        const processGenerationQueue = async (session: number): Promise<void> => {
+          generationQueueRunningRef.current = true;
 
-        // Maximum concurrent requests
-        const MAX_CONCURRENT = 1;
+          while (
+            session === generationSessionRef.current &&
+            generationQueueRef.current.length > 0
+          ) {
+            const nextPage = generationQueueRef.current.shift();
+            if (!nextPage) continue;
 
-        // Create a queue of pages
-        const queue = [...pages];
-        let activeRequests = 0;
-
-        // Function to process next items in queue
-        const processQueue = () => {
-          // Process as many items as we can up to our concurrency limit
-          while (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
-            const page = queue.shift();
-            if (page) {
-              activeRequests++;
-              console.log(`Starting page ${page.title} (${activeRequests} active, ${queue.length} remaining)`);
-
-              // Start generating content for this page
-              generatePageContent(page, owner, repo)
-                .finally(() => {
-                  // When done (success or error), decrement active count and process more
-                  activeRequests--;
-                  console.log(`Finished page ${page.title} (${activeRequests} active, ${queue.length} remaining)`);
-
-                  // Check if all work is done (queue empty and no active requests)
-                  if (queue.length === 0 && activeRequests === 0) {
-                    console.log("All page generation tasks completed.");
-                    setIsLoading(false);
-                    setLoadingMessage(undefined);
-                  } else {
-                    // Only process more if there are items remaining and we're under capacity
-                    if (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
-                      processQueue();
-                    }
-                  }
-                });
-            }
+            console.log(`Starting page ${nextPage.title} (${generationQueueRef.current.length} remaining)`);
+            await generatePageContent(nextPage, owner, repo);
           }
 
-          // Additional check: If the queue started empty or becomes empty and no requests were started/active
-          if (queue.length === 0 && activeRequests === 0 && pages.length > 0 && pagesInProgress.size === 0) {
-            // This handles the case where the queue might finish before the finally blocks fully update activeRequests
-            // or if the initial queue was processed very quickly
-            console.log("Queue empty and no active requests after loop, ensuring loading is false.");
-            setIsLoading(false);
-            setLoadingMessage(undefined);
-          } else if (pages.length === 0) {
-            // Handle case where there were no pages to begin with
-            setIsLoading(false);
-            setLoadingMessage(undefined);
+          if (session !== generationSessionRef.current && generationQueueRef.current.length > 0) {
+            await processGenerationQueue(generationSessionRef.current);
+            return;
           }
+
+          generationQueueRunningRef.current = false;
+          console.log('All page generation tasks completed.');
+          setLoadingMessage(undefined);
         };
 
-        // Start processing the queue
-        processQueue();
+        if (!generationQueueRunningRef.current) {
+          void processGenerationQueue(generationSession);
+        }
       } else {
-        // Set loading to false if there were no pages found
         setIsLoading(false);
         setLoadingMessage(undefined);
       }
@@ -1195,7 +1305,7 @@ IMPORTANT:
     } finally {
       setStructureRequestInProgress(false);
     }
-  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, language, isComprehensiveView]);
+  }, [generatePageContent, currentToken, effectiveRepoInfo, structureRequestInProgress, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, language, isComprehensiveView]);
 
   // Fetch repository structure using GitHub or GitLab API
   const fetchRepositoryStructure = useCallback(async () => {
@@ -1205,7 +1315,13 @@ IMPORTANT:
       return;
     }
 
-    // Reset previous state
+    // Reset previous state and invalidate any older background generation session.
+    generationSessionRef.current += 1;
+    generationQueueRef.current = [];
+    indexSocketRef.current?.close();
+    indexSocketRef.current = null;
+    indexReadyPromiseRef.current = null;
+    setIndexProgress(null);
     setWikiStructure(undefined);
     setCurrentPageId(undefined);
     setGeneratedPages({});
@@ -1524,7 +1640,8 @@ IMPORTANT:
         }
       }
 
-      // Now determine the wiki structure
+      // Build the full code index in parallel; the Wiki directory only needs the tree and README.
+      void startRepositoryIndex();
       await determineWikiStructure(fileTreeData, readmeContent, owner, repo);
 
     } catch (error) {
@@ -1536,7 +1653,7 @@ IMPORTANT:
       // Reset the request in progress flag
       setRequestInProgress(false);
     }
-  }, [owner, repo, determineWikiStructure, currentToken, effectiveRepoInfo, requestInProgress]);
+  }, [owner, repo, determineWikiStructure, startRepositoryIndex, currentToken, effectiveRepoInfo, requestInProgress]);
 
   // Function to export wiki content
   const exportWiki = useCallback(async (format: 'markdown' | 'json') => {
@@ -1703,7 +1820,13 @@ IMPORTANT:
     cacheLoadedSuccessfully.current = false;
     effectRan.current = false; // Allow the main data loading useEffect to run again
 
-    // Reset all state
+    // Reset all state and stop scheduling pages from the previous generation.
+    generationSessionRef.current += 1;
+    generationQueueRef.current = [];
+    indexSocketRef.current?.close();
+    indexSocketRef.current = null;
+    indexReadyPromiseRef.current = null;
+    setIndexProgress(null);
     setWikiStructure(undefined);
     setCurrentPageId(undefined);
     setGeneratedPages({});
@@ -1981,12 +2104,29 @@ IMPORTANT:
   }, [isLoading, error, wikiStructure, generatedPages, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, effectiveRepoInfo.repoUrl, repoUrl, language, isComprehensiveView]);
 
   const handlePageSelect = (pageId: string) => {
-    if (currentPageId != pageId) {
-      setCurrentPageId(pageId)
+    const queuedPageIndex = generationQueueRef.current.findIndex(page => page.id === pageId);
+    if (queuedPageIndex > 0) {
+      const [selectedPage] = generationQueueRef.current.splice(queuedPageIndex, 1);
+      generationQueueRef.current.unshift(selectedPage);
+    }
+
+    if (currentPageId !== pageId) {
+      setCurrentPageId(pageId);
     }
   };
 
   const [isModelSelectionModalOpen, setIsModelSelectionModalOpen] = useState(false);
+  const indexStagePosition = indexProgress?.stage === 'complete'
+    ? INDEX_STAGES.length
+    : INDEX_STAGES.findIndex(stage => stage.id === indexProgress?.stage);
+  const indexStagePercent = indexProgress && indexProgress.total > 0
+    ? Math.min(100, Math.round((indexProgress.current / indexProgress.total) * 100))
+    : 0;
+  const indexOverallPercent = indexProgress?.stage === 'complete'
+    ? 100
+    : indexStagePosition >= 0
+      ? Math.round(((indexStagePosition + indexStagePercent / 100) / INDEX_STAGES.length) * 100)
+      : 0;
 
   return (
     <div className="h-screen paper-texture p-4 md:p-8 flex flex-col">
@@ -2017,6 +2157,42 @@ IMPORTANT:
               {loadingMessage || '加载中...' || 'Loading...'}
               {isExporting && ('请等待，我们正在准备您的下载...' || ' Please wait while we prepare your download...')}
             </p>
+
+            {indexProgress && (
+              <div className="mt-4 w-full max-w-2xl rounded-lg border border-[var(--border-color)] bg-[var(--background)]/40 p-5">
+                <div className="mb-4 flex items-center justify-between gap-4 text-sm">
+                  <span className="font-medium text-[var(--foreground)]">{indexProgress.message}</span>
+                  {indexProgress.total > 0 && indexProgress.stage !== 'complete' && indexProgress.stage !== 'error' && (
+                    <span className="shrink-0 text-[var(--muted)]">
+                      {indexProgress.current}/{indexProgress.total} · {indexStagePercent}%
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-5 gap-2">
+                  {INDEX_STAGES.map((stage, index) => {
+                    const completed = index < indexStagePosition || indexProgress.stage === 'complete';
+                    const active = index === indexStagePosition;
+                    return (
+                      <div key={stage.id} className="min-w-0 text-center">
+                        <div className={`mx-auto mb-2 h-2.5 w-2.5 rounded-full ${
+                          completed || active ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-color)]'
+                        } ${active ? 'animate-pulse' : ''}`} />
+                        <span className={`text-xs ${
+                          completed || active ? 'text-[var(--foreground)]' : 'text-[var(--muted)]'
+                        }`}>{stage.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {indexProgress.file && (
+                  <p className="mt-4 truncate border-t border-[var(--border-color)] pt-3 font-mono text-xs text-[var(--muted)]">
+                    当前文件：{indexProgress.file}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Progress bar for page generation */}
             {wikiStructure && (
@@ -2187,17 +2363,56 @@ IMPORTANT:
 
             {/* Wiki Content */}
             <div id="wiki-content" className="w-full flex-grow p-6 lg:p-8 overflow-y-auto">
+              {indexProgress?.type === 'progress' && (
+                <div className="max-w-[900px] xl:max-w-[1000px] mx-auto mb-4 rounded-lg border border-[var(--accent-primary)]/25 bg-[var(--accent-primary)]/5 p-4">
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="min-w-0 truncate text-[var(--foreground)]">
+                      {indexProgress.message}{indexProgress.file ? `：${indexProgress.file}` : ''}
+                    </span>
+                    <span className="shrink-0 text-[var(--muted)]">{indexOverallPercent}%</span>
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--background)]/70">
+                    <div
+                      className="h-full rounded-full bg-[var(--accent-primary)] transition-all duration-300"
+                      style={{ width: `${indexOverallPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {pagesInProgress.size > 0 && (
+                <div className="max-w-[900px] xl:max-w-[1000px] mx-auto mb-6 rounded-lg border border-[var(--accent-primary)]/25 bg-[var(--accent-primary)]/5 p-4">
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-[var(--foreground)]">其余页面正在后台生成，您可以继续浏览</span>
+                    <span className="shrink-0 text-[var(--muted)]">
+                      已完成 {wikiStructure.pages.length - pagesInProgress.size}/{wikiStructure.pages.length}
+                    </span>
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--background)]/70">
+                    <div
+                      className="h-full rounded-full bg-[var(--accent-primary)] transition-all duration-300"
+                      style={{ width: `${100 * (wikiStructure.pages.length - pagesInProgress.size) / wikiStructure.pages.length}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {currentPageId && generatedPages[currentPageId] ? (
                 <div className="max-w-[900px] xl:max-w-[1000px] mx-auto">
                   <h3 className="text-xl font-bold text-[var(--foreground)] mb-4 break-words font-serif">
                     {generatedPages[currentPageId].title}
                   </h3>
 
-                  <div className="prose prose-sm md:prose-base lg:prose-lg max-w-none">
-                    <Markdown
-                      content={generatedPages[currentPageId].content}
-                    />
-                  </div>
+                  {generatedPages[currentPageId].content ? (
+                    <div className="prose prose-sm md:prose-base lg:prose-lg max-w-none">
+                      <Markdown content={generatedPages[currentPageId].content} />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 py-8 text-sm text-[var(--muted)]">
+                      <FaSync className="animate-spin text-[var(--accent-primary)]" />
+                      正在生成当前页面，内容将实时显示...
+                    </div>
+                  )}
 
                   {generatedPages[currentPageId].relatedPages.length > 0 && (
                     <div className="mt-8 pt-4 border-t border-[var(--border-color)]">
@@ -2220,6 +2435,14 @@ IMPORTANT:
                       </div>
                     </div>
                   )}
+                </div>
+              ) : currentPageId ? (
+                <div className="flex h-full flex-col items-center justify-center p-8 text-center text-[var(--muted)]">
+                  <FaSync className="mb-4 animate-spin text-3xl text-[var(--accent-primary)]" />
+                  <h3 className="mb-2 font-serif text-lg font-semibold text-[var(--foreground)]">
+                    {wikiStructure.pages.find(page => page.id === currentPageId)?.title}
+                  </h3>
+                  <p className="text-sm">该页面已提升为优先任务，生成后将在这里实时显示</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center p-8 text-[var(--muted)] h-full">

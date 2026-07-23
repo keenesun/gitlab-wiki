@@ -72,6 +72,10 @@ class ChatCompletionRequest(BaseModel):
     excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
+    skip_rag: bool = Field(
+        False,
+        description="Generate directly from the supplied prompt without preparing repository retrieval",
+    )
 
 @app.post("/chat/completions/stream")
 async def chat_completions_stream(request: ChatCompletionRequest):
@@ -111,8 +115,11 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 included_files = [unquote(file_pattern) for file_pattern in request.included_files.split('\n') if file_pattern.strip()]
                 logger.info(f"Using custom included files: {included_files}")
 
-            request_rag.prepare_retriever(request.repo_url, request.type, request.token, excluded_dirs, excluded_files, included_dirs, included_files)
-            logger.info(f"Retriever prepared for {request.repo_url}")
+            if not request.skip_rag:
+                request_rag.prepare_retriever(request.repo_url, request.type, request.token, excluded_dirs, excluded_files, included_dirs, included_files)
+                logger.info(f"Retriever prepared for {request.repo_url}")
+            else:
+                logger.info("Skipping repository retrieval preparation for this request")
         except ValueError as e:
             if "No valid documents with embeddings found" in str(e):
                 logger.error(f"No valid embeddings found: {str(e)}")
@@ -188,7 +195,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         context_text = ""
         retrieved_documents = None
 
-        if not input_too_large:
+        if not input_too_large and not request.skip_rag:
             try:
                 # If filePath exists, modify the query for RAG to focus on the file
                 rag_query = query
